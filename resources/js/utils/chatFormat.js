@@ -23,6 +23,48 @@ export function formatDateTime(isoString) {
     });
 }
 
+export function formatDate(isoString) {
+    if (!isoString) {
+        return '';
+    }
+
+    return new Date(isoString).toLocaleDateString([], {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+    });
+}
+
+function calendarDayKey(isoString) {
+    if (!isoString) {
+        return '';
+    }
+
+    const date = new Date(isoString);
+
+    return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+export function shouldShowDateSeparator(messages, index) {
+    const message = messages[index];
+
+    if (!message || isSystemMessage(message)) {
+        return false;
+    }
+
+    const messageDay = calendarDayKey(message.created_at);
+
+    for (let i = index - 1; i >= 0; i -= 1) {
+        if (isSystemMessage(messages[i])) {
+            continue;
+        }
+
+        return calendarDayKey(messages[i].created_at) !== messageDay;
+    }
+
+    return true;
+}
+
 export function isSystemMessage(message) {
     if (typeof message.is_system === 'boolean') {
         return message.is_system;

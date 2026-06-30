@@ -1,7 +1,7 @@
 <script setup>
 import { formatDateTime, formatTime, isSystemMessage } from '../../utils/chatFormat';
 
-defineProps({
+const props = defineProps({
     message: {
         type: Object,
         required: true,
@@ -10,12 +10,31 @@ defineProps({
 
 const emit = defineEmits(['openViewer', 'showContextMenu']);
 
+function messageCanDelete(msg) {
+    return msg.is_mine && !isSystemMessage(msg);
+}
+
 function handleImageClick(attachment) {
     emit('openViewer', attachment);
 }
 
-function handleImageContextMenu(event, url) {
-    emit('showContextMenu', event, url);
+function handleImageContextMenu(event, attachment) {
+    event.stopPropagation();
+    emit('showContextMenu', event, {
+        message: props.message,
+        imageUrl: attachment.url,
+    });
+}
+
+function handleMessageContextMenu(event) {
+    if (!messageCanDelete(props.message)) {
+        return;
+    }
+
+    emit('showContextMenu', event, {
+        message: props.message,
+        imageUrl: null,
+    });
 }
 </script>
 
@@ -29,7 +48,7 @@ function handleImageContextMenu(event, url) {
         <div
             v-if="isSystemMessage(message)"
             :title="formatDateTime(message.created_at)"
-            class="max-w-[85%] cursor-default rounded-3xl bg-gray-200 px-5 py-3 text-center text-sm text-gray-600"
+            class="max-w-[85%] cursor-default rounded-3xl bg-gray-200 px-5 py-3 text-center text-sm text-gray-600 dark:bg-gray-700 dark:text-gray-300"
         >
             <div
                 v-if="message.attachments?.length"
@@ -43,7 +62,7 @@ function handleImageContextMenu(event, url) {
                     :alt="attachment.original_name"
                     class="max-h-64 cursor-pointer rounded-2xl object-contain"
                     @click="handleImageClick(attachment)"
-                    @contextmenu.prevent="handleImageContextMenu($event, attachment.url)"
+                    @contextmenu.prevent="handleImageContextMenu($event, attachment)"
                 />
             </div>
 
@@ -57,12 +76,16 @@ function handleImageContextMenu(event, url) {
 
         <div
             v-else
-            class="max-w-[75%] rounded-2xl px-4 py-2 shadow-sm"
-            :class="message.is_mine
-                ? 'bg-blue-600 text-white'
-                : 'border border-gray-200 bg-white text-gray-900'"
+            class="max-w-[75%] rounded-2xl px-4 py-2"
+            :class="[
+                message.is_mine
+                    ? 'bg-blue-600 text-white'
+                    : 'border border-gray-200 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
+                messageCanDelete(message) ? 'cursor-context-menu' : '',
+            ]"
+            @contextmenu.prevent="handleMessageContextMenu"
         >
-            <p v-if="!message.is_mine" class="mb-1 text-xs font-medium text-gray-500">
+            <p v-if="!message.is_mine" class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">
                 {{ message.user_name }}
             </p>
 
@@ -77,7 +100,7 @@ function handleImageContextMenu(event, url) {
                     :alt="attachment.original_name"
                     class="max-h-64 cursor-pointer rounded-lg object-cover"
                     @click="handleImageClick(attachment)"
-                    @contextmenu.prevent="handleImageContextMenu($event, attachment.url)"
+                    @contextmenu.prevent="handleImageContextMenu($event, attachment)"
                 />
             </div>
 
@@ -90,7 +113,7 @@ function handleImageContextMenu(event, url) {
 
             <p
                 class="mt-1 text-right text-xs"
-                :class="message.is_mine ? 'text-blue-100' : 'text-gray-400'"
+                :class="message.is_mine ? 'text-blue-100' : 'text-gray-400 dark:text-gray-500'"
             >
                 {{ formatTime(message.created_at) }}
             </p>

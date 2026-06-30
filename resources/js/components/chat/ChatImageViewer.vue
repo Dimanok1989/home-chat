@@ -63,7 +63,7 @@ const currentImage = computed(() => props.images[props.index] ?? null);
                 :src="currentImage.url"
                 :alt="currentImage.original_name"
                 class="max-h-full max-w-full object-contain"
-                @contextmenu.prevent="emit('showContextMenu', $event, currentImage.url)"
+                @contextmenu.prevent="emit('showContextMenu', $event, currentImage)"
             />
 
             <button

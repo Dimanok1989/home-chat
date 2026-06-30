@@ -9,6 +9,18 @@
 
         <title>Домашний чат</title>
 
+        <script>
+            (function () {
+                const stored = localStorage.getItem('chat-theme');
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                const dark = stored === 'dark' || (stored !== 'light' && prefersDark);
+
+                if (dark) {
+                    document.documentElement.classList.add('dark');
+                }
+            })();
+        </script>
+
         <link rel="icon" href="/favicon.ico" sizes="any">
         <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32">
         <link rel="icon" href="/favicon-16x16.png" type="image/png" sizes="16x16">

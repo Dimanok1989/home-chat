@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import ChatConfirmModal from './chat/ChatConfirmModal.vue';
 import ChatDragOverlay from './chat/ChatDragOverlay.vue';
 import ChatImageContextMenu from './chat/ChatImageContextMenu.vue';
 import ChatImageViewer from './chat/ChatImageViewer.vue';
@@ -7,6 +8,7 @@ import ChatMessageInput from './chat/ChatMessageInput.vue';
 import ChatMessageList from './chat/ChatMessageList.vue';
 import ChatSendImageModal from './chat/ChatSendImageModal.vue';
 import ChatSidebar from './chat/ChatSidebar.vue';
+import ChatThemeToggle from './chat/ChatThemeToggle.vue';
 
 const MESSAGES_PAGE_SIZE = 40;
 
@@ -29,6 +31,11 @@ const showSendModal = ref(false);
 const viewerOpen = ref(false);
 const viewerIndex = ref(0);
 const contextMenu = ref(null);
+const deleteConfirm = ref({
+    show: false,
+    messageId: null,
+    deleting: false,
+});
 const isDragging = ref(false);
 
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
@@ -41,6 +48,8 @@ const allChatImages = computed(() => {
             images.push({
                 ...attachment,
                 message_created_at: message.created_at,
+                message_is_mine: message.is_mine,
+                message_is_system: message.is_system ?? false,
             });
         }
     }
@@ -73,12 +82,20 @@ function mapMessage(message) {
     };
 }
 
+function resolveExposedRef(exposed) {
+    if (exposed == null) {
+        return null;
+    }
+
+    return typeof exposed === 'object' && 'value' in exposed ? exposed.value : exposed;
+}
+
 function getMessagesContainer() {
-    return messageListRef.value?.messagesContainer?.value ?? null;
+    return resolveExposedRef(messageListRef.value?.messagesContainer);
 }
 
 function getMessagesEndRef() {
-    return messageListRef.value?.messagesEndRef?.value ?? null;
+    return resolveExposedRef(messageListRef.value?.messagesEndRef);
 }
 
 function appendMessage(message) {
@@ -404,16 +421,103 @@ function handleViewerKeydown(event) {
     }
 }
 
-function showImageContextMenu(event, url) {
+function showContextMenu(event, payload) {
+    const message = payload?.message ?? null;
+
     contextMenu.value = {
         x: event.clientX,
         y: event.clientY,
-        url,
+        imageUrl: payload?.imageUrl ?? null,
+        messageId: message?.id ?? null,
+        canDelete: Boolean(message?.is_mine && !message?.is_system),
     };
+}
+
+function showContextMenuFromViewer(event, image) {
+    showContextMenu(event, {
+        message: {
+            id: image.message_id,
+            is_mine: image.message_is_mine,
+            is_system: image.message_is_system,
+        },
+        imageUrl: image.url,
+    });
 }
 
 function hideContextMenu() {
     contextMenu.value = null;
+}
+
+function removeMessage(messageId) {
+    messages.value = messages.value.filter((item) => item.id !== messageId);
+
+    if (viewerOpen.value) {
+        const remainingImages = allChatImages.value;
+
+        if (remainingImages.length === 0) {
+            closeViewer();
+        } else if (viewerIndex.value >= remainingImages.length) {
+            viewerIndex.value = remainingImages.length - 1;
+        }
+    }
+}
+
+function deleteMessage(messageId) {
+    hideContextMenu();
+
+    deleteConfirm.value = {
+        show: true,
+        messageId,
+        deleting: false,
+    };
+}
+
+function closeDeleteConfirm() {
+    if (deleteConfirm.value.deleting) {
+        return;
+    }
+
+    deleteConfirm.value = {
+        show: false,
+        messageId: null,
+        deleting: false,
+    };
+}
+
+async function confirmDeleteMessage() {
+    const messageId = deleteConfirm.value.messageId;
+
+    if (!messageId || deleteConfirm.value.deleting) {
+        return;
+    }
+
+    deleteConfirm.value.deleting = true;
+
+    try {
+        const response = await fetch(`/api/messages/${messageId}`, {
+            method: 'DELETE',
+            headers: {
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+            },
+            credentials: 'same-origin',
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.message ?? 'Не удалось удалить сообщение');
+        }
+
+        removeMessage(messageId);
+        deleteConfirm.value = {
+            show: false,
+            messageId: null,
+            deleting: false,
+        };
+    } catch (err) {
+        error.value = err.message ?? 'Ошибка удаления';
+        deleteConfirm.value.deleting = false;
+    }
 }
 
 async function copyImageToClipboard(url) {
@@ -440,16 +544,17 @@ async function copyImageToClipboard(url) {
 
 function scrollToBottom() {
     const scroll = () => {
-        const messagesEndRef = getMessagesEndRef();
+        const container = getMessagesContainer();
 
-        if (messagesEndRef) {
-            messagesEndRef.scrollIntoView({ block: 'end', behavior: 'instant' });
-        } else {
-            const container = getMessagesContainer();
+        if (container) {
+            container.scrollTop = container.scrollHeight;
+            return;
+        }
 
-            if (container) {
-                container.scrollTop = container.scrollHeight;
-            }
+        const messagesEndEl = getMessagesEndRef();
+
+        if (messagesEndEl) {
+            messagesEndEl.scrollIntoView({ block: 'end', behavior: 'auto' });
         }
     };
 
@@ -520,6 +625,9 @@ onMounted(async () => {
             .listen('.MessageSent', (payload) => {
                 appendMessage(payload);
             })
+            .listen('.MessageDeleted', (payload) => {
+                removeMessage(payload.id);
+            })
             .error((err) => {
                 console.error('Echo presence error', err);
                 error.value = 'Ошибка подключения к чату';
@@ -540,19 +648,20 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="flex h-screen bg-gray-100 text-gray-900">
+    <div class="flex h-screen bg-gray-100 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
         <ChatSidebar :online-users="onlineUsers" />
 
         <main
-            class="relative flex min-w-0 flex-1 flex-col"
+            class="relative flex min-w-0 flex-1 flex-col bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800"
             @dragover="handleDragOver"
             @dragleave="handleDragLeave"
             @drop="handleDrop"
         >
             <ChatDragOverlay :visible="isDragging" />
 
-            <header class="w-full shrink-0 border-b border-gray-200 bg-white px-6 py-4">
+            <header class="flex w-full shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-gray-700 dark:bg-gray-900">
                 <h1 class="text-lg font-semibold">Домашний чат</h1>
+                <ChatThemeToggle />
             </header>
 
             <div class="flex min-h-0 flex-1 w-full flex-col items-center">
@@ -563,7 +672,7 @@ onUnmounted(() => {
                         :loading-older="loadingOlder"
                         @scroll="handleMessagesScroll"
                         @open-viewer="openViewer"
-                        @show-context-menu="showImageContextMenu"
+                        @show-context-menu="showContextMenu"
                     />
 
                     <ChatMessageInput
@@ -578,6 +687,16 @@ onUnmounted(() => {
         </main>
 
         <Teleport to="body">
+            <ChatConfirmModal
+                :show="deleteConfirm.show"
+                title="Удалить сообщение"
+                message="Вы уверены, что хотите удалить это сообщение? Это действие нельзя отменить."
+                confirm-label="Удалить"
+                :loading="deleteConfirm.deleting"
+                @close="closeDeleteConfirm"
+                @confirm="confirmDeleteMessage"
+            />
+
             <ChatSendImageModal
                 :show="showSendModal"
                 :preview-url="pendingPreviewUrl"
@@ -591,6 +710,7 @@ onUnmounted(() => {
             <ChatImageContextMenu
                 :context-menu="contextMenu"
                 @copy="copyImageToClipboard"
+                @delete="deleteMessage"
             />
 
             <ChatImageViewer
@@ -600,7 +720,7 @@ onUnmounted(() => {
                 @close="closeViewer"
                 @go-newer="viewerGoNewer"
                 @go-older="viewerGoOlder"
-                @show-context-menu="showImageContextMenu"
+                @show-context-menu="showContextMenuFromViewer"
             />
         </Teleport>
     </div>

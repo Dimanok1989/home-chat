@@ -1,8 +1,10 @@
 <script setup>
 import { ref } from 'vue';
+import ChatDateSeparator from './ChatDateSeparator.vue';
 import ChatMessage from './ChatMessage.vue';
+import { shouldShowDateSeparator } from '../../utils/chatFormat';
 
-defineProps({
+const props = defineProps({
     messages: {
         type: Array,
         default: () => [],
@@ -32,20 +34,28 @@ defineExpose({
     >
         <div
             v-if="loadingOlder"
-            class="py-2 text-center text-xs text-gray-400"
+            class="py-2 text-center text-xs text-gray-400 dark:text-gray-500"
         >
             Загрузка...
         </div>
 
-        <ChatMessage
-            v-for="message in messages"
+        <template
+            v-for="(message, index) in props.messages"
             :key="message.id"
-            :message="message"
-            @open-viewer="emit('openViewer', $event)"
-            @show-context-menu="(event, url) => emit('showContextMenu', event, url)"
-        />
+        >
+            <ChatDateSeparator
+                v-if="shouldShowDateSeparator(props.messages, index)"
+                :date="message.created_at"
+            />
 
-        <p v-if="messages.length === 0" class="text-center text-sm text-gray-500">
+            <ChatMessage
+                :message="message"
+                @open-viewer="emit('openViewer', $event)"
+                @show-context-menu="(event, payload) => emit('showContextMenu', event, payload)"
+            />
+        </template>
+
+        <p v-if="props.messages.length === 0" class="text-center text-sm text-gray-500 dark:text-gray-400">
             Сообщений пока нет. Напишите первым!
         </p>
 

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\MessageDeleted;
 use App\Events\MessageSent;
 use App\Models\Message;
 use App\Models\MessageAttachment;
@@ -101,6 +102,24 @@ class MessageController extends Controller
         return response()->json([
             'message' => $this->formatMessage($message, $currentUserId),
         ], 201);
+    }
+
+    public function destroy(Message $message): JsonResponse
+    {
+        $currentUserId = Auth::id();
+
+        if ($message->user_id !== $currentUserId) {
+            abort(403);
+        }
+
+        $messageId = $message->id;
+        $message->delete();
+
+        broadcast(new MessageDeleted($messageId));
+
+        return response()->json([
+            'id' => $messageId,
+        ]);
     }
 
     /**

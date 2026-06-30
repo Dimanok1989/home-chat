@@ -18,6 +18,7 @@ Route::middleware('auth')->group(function () {
     Route::view('/chat', 'chat');
     Route::get('/api/messages', [MessageController::class, 'index']);
     Route::post('/api/messages', [MessageController::class, 'store']);
+    Route::delete('/api/messages/{message}', [MessageController::class, 'destroy']);
     Route::get('/api/chat/files/{attachment}/{token}', [ChatAttachmentController::class, 'show'])
         ->name('chat.files.show');
 });
