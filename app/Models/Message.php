@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Message extends Model
@@ -11,8 +12,7 @@ class Message extends Model
      * @var list<string>
      */
     protected $fillable = [
-        'guest_id',
-        'ip_address',
+        'user_id',
         'body',
     ];
 
@@ -24,6 +24,11 @@ class Message extends Model
         return [
             'created_at' => 'datetime',
         ];
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     public function attachments(): HasMany

@@ -38,14 +38,15 @@ class MessageSent implements ShouldBroadcastNow
      */
     public function broadcastWith(): array
     {
-        $this->message->loadMissing('attachments');
+        $this->message->loadMissing(['attachments', 'user']);
 
         return [
             'id' => $this->message->id,
-            'guest_id' => $this->message->guest_id,
-            'ip_address' => $this->message->ip_address,
+            'user_id' => $this->message->user_id,
+            'user_name' => $this->message->user?->name,
             'body' => $this->message->body,
             'created_at' => $this->message->created_at?->toIso8601String(),
+            'is_system' => $this->message->user?->name === null,
             'attachments' => $this->message->attachments->map(
                 fn (MessageAttachment $attachment) => [
                     'id' => $attachment->id,

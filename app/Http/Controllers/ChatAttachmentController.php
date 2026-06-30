@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\MessageAttachment;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -19,7 +20,7 @@ class ChatAttachmentController extends Controller
             abort(403, 'Ссылка на файл истекла');
         }
 
-        if (! $request->session()->has('guest_id')) {
+        if (! Auth::check()) {
             abort(403);
         }
 

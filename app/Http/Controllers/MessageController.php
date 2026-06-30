@@ -7,6 +7,7 @@ use App\Models\Message;
 use App\Models\MessageAttachment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -15,12 +16,12 @@ class MessageController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $guestId = $request->session()->get('guest_id');
+        $currentUserId = Auth::id();
         $limit = min(max((int) $request->query('limit', 40), 1), 100);
         $beforeId = $request->query('before_id');
 
         $query = Message::query()
-            ->with('attachments')
+            ->with(['attachments', 'user'])
             ->orderByDesc('id');
 
         if ($beforeId !== null && $beforeId !== '') {
@@ -40,10 +41,9 @@ class MessageController extends Controller
         $messages = $messages
             ->reverse()
             ->values()
-            ->map(fn (Message $message) => $this->formatMessage($message, $guestId));
+            ->map(fn (Message $message) => $this->formatMessage($message, $currentUserId));
 
         return response()->json([
-            'guest_id' => $guestId,
             'messages' => $messages,
             'has_more' => $hasMore,
         ]);
@@ -65,12 +65,11 @@ class MessageController extends Controller
             ]);
         }
 
-        $guestId = $request->session()->get('guest_id');
+        $currentUserId = Auth::id();
 
-        $message = DB::transaction(function () use ($request, $guestId, $body, $hasImage) {
+        $message = DB::transaction(function () use ($body, $hasImage, $request, $currentUserId) {
             $message = Message::query()->create([
-                'guest_id' => $guestId,
-                'ip_address' => $request->ip(),
+                'user_id' => $currentUserId,
                 'body' => $body !== '' ? $body : null,
             ]);
 
@@ -83,7 +82,7 @@ class MessageController extends Controller
                     'local',
                 );
 
-                $attachment = $message->attachments()->create([
+                $message->attachments()->create([
                     'disk' => 'local',
                     'path' => $path,
                     'original_name' => $file->getClientOriginalName(),
@@ -94,28 +93,31 @@ class MessageController extends Controller
                 ]);
             }
 
-            return $message->load('attachments');
+            return $message->load(['attachments', 'user']);
         });
 
         broadcast(new MessageSent($message));
 
         return response()->json([
-            'message' => $this->formatMessage($message, $guestId),
+            'message' => $this->formatMessage($message, $currentUserId),
         ], 201);
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function formatMessage(Message $message, ?string $guestId): array
+    private function formatMessage(Message $message, ?int $currentUserId): array
     {
+        $userName = $message->user?->name;
+
         return [
             'id' => $message->id,
-            'guest_id' => $message->guest_id,
-            'ip_address' => $message->ip_address,
+            'user_id' => $message->user_id,
+            'user_name' => $userName,
             'body' => $message->body,
             'created_at' => $message->created_at?->toIso8601String(),
-            'is_mine' => $guestId !== null && $message->guest_id === $guestId,
+            'is_mine' => $currentUserId !== null && $message->user_id === $currentUserId,
+            'is_system' => $userName === null,
             'attachments' => $message->attachments->map(
                 fn (MessageAttachment $attachment) => $this->formatAttachment($attachment),
             )->values()->all(),

@@ -1,22 +1,27 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import ChatDragOverlay from './chat/ChatDragOverlay.vue';
+import ChatImageContextMenu from './chat/ChatImageContextMenu.vue';
+import ChatImageViewer from './chat/ChatImageViewer.vue';
+import ChatMessageInput from './chat/ChatMessageInput.vue';
+import ChatMessageList from './chat/ChatMessageList.vue';
+import ChatSendImageModal from './chat/ChatSendImageModal.vue';
+import ChatSidebar from './chat/ChatSidebar.vue';
 
 const MESSAGES_PAGE_SIZE = 40;
 
 const messages = ref([]);
 const onlineUsers = ref([]);
 const newMessage = ref('');
-const guestId = ref(
-    document.querySelector('meta[name="guest-id"]')?.getAttribute('content') ?? '',
+const currentUserId = ref(
+    Number(document.querySelector('meta[name="user-id"]')?.getAttribute('content') ?? 0) || null,
 );
 const sending = ref(false);
 const error = ref('');
 const loadingOlder = ref(false);
 const hasMoreOlder = ref(true);
 const initialLoadDone = ref(false);
-const messagesContainer = ref(null);
-const messagesEndRef = ref(null);
-const fileInputRef = ref(null);
+const messageListRef = ref(null);
 const modalText = ref('');
 const pendingImage = ref(null);
 const pendingPreviewUrl = ref(null);
@@ -27,8 +32,6 @@ const contextMenu = ref(null);
 const isDragging = ref(false);
 
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
-
-const onlineCount = computed(() => onlineUsers.value.length);
 
 const allChatImages = computed(() => {
     const images = [];
@@ -50,31 +53,16 @@ const allChatImages = computed(() => {
     });
 });
 
-const currentViewerImage = computed(() => allChatImages.value[viewerIndex.value] ?? null);
-
-function formatTime(isoString) {
-    if (!isoString) {
-        return '';
-    }
-
-    return new Date(isoString).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-    });
-}
-
 function resolveIsMine(message) {
     if (typeof message.is_mine === 'boolean') {
         return message.is_mine;
     }
 
-    return Boolean(message.guest_id && message.guest_id === guestId.value);
-}
-
-function syncGuestId(id) {
-    if (id) {
-        guestId.value = id;
-    }
+    return Boolean(
+        currentUserId.value
+        && message.user_id
+        && Number(message.user_id) === currentUserId.value,
+    );
 }
 
 function mapMessage(message) {
@@ -83,6 +71,14 @@ function mapMessage(message) {
         attachments: message.attachments ?? [],
         is_mine: resolveIsMine(message),
     };
+}
+
+function getMessagesContainer() {
+    return messageListRef.value?.messagesContainer?.value ?? null;
+}
+
+function getMessagesEndRef() {
+    return messageListRef.value?.messagesEndRef?.value ?? null;
 }
 
 function appendMessage(message) {
@@ -127,7 +123,6 @@ async function fetchMessages(beforeId = null) {
 
 async function loadMessages() {
     const data = await fetchMessages();
-    syncGuestId(data.guest_id);
     messages.value = data.messages.map(mapMessage);
     hasMoreOlder.value = data.has_more;
     initialLoadDone.value = true;
@@ -140,7 +135,7 @@ async function loadOlderMessages() {
         return;
     }
 
-    const container = messagesContainer.value;
+    const container = getMessagesContainer();
 
     if (!container) {
         return;
@@ -153,7 +148,6 @@ async function loadOlderMessages() {
 
     try {
         const data = await fetchMessages(messages.value[0].id);
-        syncGuestId(data.guest_id);
 
         const existingIds = new Set(messages.value.map((item) => item.id));
         const olderMessages = data.messages
@@ -177,7 +171,7 @@ async function loadOlderMessages() {
 }
 
 function handleMessagesScroll() {
-    const container = messagesContainer.value;
+    const container = getMessagesContainer();
 
     if (!container || loadingOlder.value || !hasMoreOlder.value) {
         return;
@@ -216,7 +210,6 @@ async function sendMessage() {
         }
 
         const data = await response.json();
-        syncGuestId(data.message.guest_id);
         appendMessage(data.message);
         newMessage.value = '';
     } catch (err) {
@@ -288,7 +281,6 @@ async function sendMessageWithImage() {
         }
 
         const data = await response.json();
-        syncGuestId(data.message.guest_id);
         appendMessage(data.message);
         closeSendModal();
     } catch (err) {
@@ -296,28 +288,6 @@ async function sendMessageWithImage() {
     } finally {
         sending.value = false;
     }
-}
-
-function handleKeydown(event) {
-    if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        sendMessage();
-    }
-}
-
-function handleModalKeydown(event) {
-    if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        sendMessageWithImage();
-    }
-
-    if (event.key === 'Escape') {
-        closeSendModal();
-    }
-}
-
-function handleAttachClick() {
-    fileInputRef.value?.click();
 }
 
 function handleFileSelect(event) {
@@ -470,10 +440,16 @@ async function copyImageToClipboard(url) {
 
 function scrollToBottom() {
     const scroll = () => {
-        if (messagesEndRef.value) {
-            messagesEndRef.value.scrollIntoView({ block: 'end', behavior: 'instant' });
-        } else if (messagesContainer.value) {
-            messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+        const messagesEndRef = getMessagesEndRef();
+
+        if (messagesEndRef) {
+            messagesEndRef.scrollIntoView({ block: 'end', behavior: 'instant' });
+        } else {
+            const container = getMessagesContainer();
+
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+            }
         }
     };
 
@@ -489,7 +465,8 @@ function bindImageLoadScroll() {
     }
 
     nextTick(() => {
-        const images = messagesContainer.value?.querySelectorAll('img') ?? [];
+        const container = getMessagesContainer();
+        const images = container?.querySelectorAll('img') ?? [];
 
         for (const img of images) {
             if (!img.complete) {
@@ -564,27 +541,7 @@ onUnmounted(() => {
 
 <template>
     <div class="flex h-screen bg-gray-100 text-gray-900">
-        <aside class="flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white">
-            <div class="border-b border-gray-200 px-4 py-4">
-                <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Онлайн</h2>
-                <p class="mt-1 text-2xl font-bold text-gray-900">{{ onlineCount }}</p>
-            </div>
-
-            <ul class="flex-1 overflow-y-auto p-3">
-                <li
-                    v-for="user in onlineUsers"
-                    :key="user.id"
-                    class="mb-2 flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-sm"
-                >
-                    <span class="h-2 w-2 shrink-0 rounded-full bg-green-500"></span>
-                    <span class="truncate font-medium">{{ user.name }}</span>
-                </li>
-
-                <li v-if="onlineUsers.length === 0" class="px-3 py-2 text-sm text-gray-500">
-                    Пока никого нет
-                </li>
-            </ul>
-        </aside>
+        <ChatSidebar :online-users="onlineUsers" />
 
         <main
             class="relative flex min-w-0 flex-1 flex-col"
@@ -592,14 +549,7 @@ onUnmounted(() => {
             @dragleave="handleDragLeave"
             @drop="handleDrop"
         >
-            <div
-                v-if="isDragging"
-                class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-blue-500/10 backdrop-blur-[1px]"
-            >
-                <p class="rounded-xl bg-white px-6 py-3 text-sm font-medium text-blue-700 shadow-lg">
-                    Отпустите изображение для отправки
-                </p>
-            </div>
+            <ChatDragOverlay :visible="isDragging" />
 
             <header class="w-full shrink-0 border-b border-gray-200 bg-white px-6 py-4">
                 <h1 class="text-lg font-semibold">Домашний чат</h1>
@@ -607,239 +557,51 @@ onUnmounted(() => {
 
             <div class="flex min-h-0 flex-1 w-full flex-col items-center">
                 <div class="flex h-full w-full max-w-[1000px] flex-col">
-            <div
-                ref="messagesContainer"
-                class="messages-scroll flex-1 space-y-3 overflow-y-auto px-6 py-4"
-                @scroll="handleMessagesScroll"
-            >
-                <div
-                    v-if="loadingOlder"
-                    class="py-2 text-center text-xs text-gray-400"
-                >
-                    Загрузка...
-                </div>
-
-                <div
-                    v-for="message in messages"
-                    :key="message.id"
-                    class="flex"
-                    :class="message.is_mine ? 'justify-end' : 'justify-start'"
-                >
-                    <div
-                        class="max-w-[75%] rounded-2xl px-4 py-2 shadow-sm"
-                        :class="message.is_mine
-                            ? 'bg-blue-600 text-white'
-                            : 'border border-gray-200 bg-white text-gray-900'"
-                    >
-                        <p v-if="!message.is_mine" class="mb-1 text-xs font-medium text-gray-500">
-                            {{ message.ip_address }}
-                        </p>
-
-                        <div
-                            v-if="message.attachments?.length"
-                            class="mb-2 space-y-2"
-                        >
-                            <img
-                                v-for="attachment in message.attachments"
-                                :key="attachment.id"
-                                :src="attachment.url"
-                                :alt="attachment.original_name"
-                                class="max-h-64 cursor-pointer rounded-lg object-cover"
-                                @click="openViewer(attachment)"
-                                @contextmenu.prevent="showImageContextMenu($event, attachment.url)"
-                            />
-                        </div>
-
-                        <p
-                            v-if="message.body"
-                            class="whitespace-pre-wrap break-words text-sm"
-                        >
-                            {{ message.body }}
-                        </p>
-
-                        <p
-                            class="mt-1 text-right text-xs"
-                            :class="message.is_mine ? 'text-blue-100' : 'text-gray-400'"
-                        >
-                            {{ formatTime(message.created_at) }}
-                        </p>
-                    </div>
-                </div>
-
-                <p v-if="messages.length === 0" class="text-center text-sm text-gray-500">
-                    Сообщений пока нет. Напишите первым!
-                </p>
-
-                <div ref="messagesEndRef" aria-hidden="true" class="h-px shrink-0" />
-            </div>
-
-            <div class="border-t border-gray-200 bg-white px-6 py-4">
-                <p v-if="error" class="mb-2 text-sm text-red-600">{{ error }}</p>
-
-                <form class="flex gap-3" @submit.prevent="sendMessage">
-                    <input
-                        ref="fileInputRef"
-                        type="file"
-                        accept="image/*"
-                        class="hidden"
-                        @change="handleFileSelect"
+                    <ChatMessageList
+                        ref="messageListRef"
+                        :messages="messages"
+                        :loading-older="loadingOlder"
+                        @scroll="handleMessagesScroll"
+                        @open-viewer="openViewer"
+                        @show-context-menu="showImageContextMenu"
                     />
 
-                    <button
-                        type="button"
-                        class="flex shrink-0 items-center justify-center rounded-xl border border-gray-300 px-3 py-3 text-gray-600 transition hover:bg-gray-50 hover:text-gray-900"
-                        title="Прикрепить изображение"
-                        @click="handleAttachClick"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                        </svg>
-                    </button>
-
-                    <input
+                    <ChatMessageInput
                         v-model="newMessage"
-                        type="text"
-                        maxlength="1000"
-                        placeholder="Введите сообщение..."
-                        class="flex-1 rounded-xl border border-gray-300 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
-                        @keydown="handleKeydown"
+                        :sending="sending"
+                        :error="error"
+                        @send="sendMessage"
+                        @file-select="handleFileSelect"
                     />
-
-                    <button
-                        type="submit"
-                        :disabled="sending || !newMessage.trim()"
-                        class="rounded-xl bg-blue-600 px-5 py-3 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-                    >
-                        {{ sending ? '...' : 'Отправить' }}
-                    </button>
-                </form>
-            </div>
                 </div>
             </div>
         </main>
 
         <Teleport to="body">
-            <div
-                v-if="showSendModal"
-                class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-                @click.self="closeSendModal"
-            >
-                <div class="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
-                    <h3 class="mb-4 text-lg font-semibold text-gray-900">Отправить изображение</h3>
+            <ChatSendImageModal
+                :show="showSendModal"
+                :preview-url="pendingPreviewUrl"
+                :text="modalText"
+                :sending="sending"
+                @close="closeSendModal"
+                @send="sendMessageWithImage"
+                @update:text="modalText = $event"
+            />
 
-                    <img
-                        v-if="pendingPreviewUrl"
-                        :src="pendingPreviewUrl"
-                        alt="Предпросмотр"
-                        class="mb-4 max-h-80 w-full rounded-xl object-contain bg-gray-50"
-                    />
+            <ChatImageContextMenu
+                :context-menu="contextMenu"
+                @copy="copyImageToClipboard"
+            />
 
-                    <textarea
-                        v-model="modalText"
-                        rows="3"
-                        maxlength="1000"
-                        placeholder="Добавьте подпись (необязательно)..."
-                        class="mb-4 w-full resize-none rounded-xl border border-gray-300 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
-                        @keydown="handleModalKeydown"
-                    />
-
-                    <div class="flex justify-end gap-3">
-                        <button
-                            type="button"
-                            class="rounded-xl border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                            @click="closeSendModal"
-                        >
-                            Отмена
-                        </button>
-                        <button
-                            type="button"
-                            :disabled="sending"
-                            class="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-blue-300"
-                            @click="sendMessageWithImage"
-                        >
-                            {{ sending ? 'Отправка...' : 'Отправить' }}
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div
-                v-if="contextMenu"
-                class="fixed z-[60] min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-                :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
-            >
-                <button
-                    type="button"
-                    class="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
-                    @click="copyImageToClipboard(contextMenu.url)"
-                >
-                    Копировать изображение
-                </button>
-            </div>
-
-            <div
-                v-if="viewerOpen && currentViewerImage"
-                class="fixed inset-0 z-50 flex flex-col bg-black/90"
-                @click.self="closeViewer"
-            >
-                <div class="flex items-center justify-between px-4 py-3 text-white">
-                    <button
-                        type="button"
-                        class="rounded-lg px-3 py-1 text-sm hover:bg-white/10"
-                        @click="closeViewer"
-                    >
-                        Закрыть
-                    </button>
-                    <p class="text-sm text-white/80">
-                        {{ viewerIndex + 1 }} / {{ allChatImages.length }}
-                    </p>
-                    <div class="w-16"></div>
-                </div>
-
-                <div class="relative flex flex-1 items-center justify-center px-4 pb-4">
-                    <button
-                        v-if="viewerIndex > 0"
-                        type="button"
-                        class="absolute left-4 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
-                        title="Новее"
-                        @click="viewerGoNewer"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M15 18l-6-6 6-6" />
-                        </svg>
-                    </button>
-
-                    <img
-                        :src="currentViewerImage.url"
-                        :alt="currentViewerImage.original_name"
-                        class="max-h-full max-w-full object-contain"
-                        @contextmenu.prevent="showImageContextMenu($event, currentViewerImage.url)"
-                    />
-
-                    <button
-                        v-if="viewerIndex < allChatImages.length - 1"
-                        type="button"
-                        class="absolute right-4 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
-                        title="Старше"
-                        @click="viewerGoOlder"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M9 18l6-6-6-6" />
-                        </svg>
-                    </button>
-                </div>
-            </div>
+            <ChatImageViewer
+                :open="viewerOpen"
+                :images="allChatImages"
+                :index="viewerIndex"
+                @close="closeViewer"
+                @go-newer="viewerGoNewer"
+                @go-older="viewerGoOlder"
+                @show-context-menu="showImageContextMenu"
+            />
         </Teleport>
     </div>
 </template>
-
-<style scoped>
-.messages-scroll {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-}
-
-.messages-scroll::-webkit-scrollbar {
-    display: none;
-}
-</style>
