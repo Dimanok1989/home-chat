@@ -1,0 +1,26 @@
+{
+    "$schema": "https://www.schemastore.org/package.json",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "postinstall": "node scripts/patch-echo-server.mjs",
+        "build": "vite build",
+        "dev": "vite",
+        "echo-server": "laravel-echo-server start",
+        "dev:all": "concurrently -c \"#93c5fd,#c4b5fd,#fb7185\" \"php artisan serve\" \"npm run dev\" \"npm run echo-server\" --names=server,vite,echo"
+    },
+    "devDependencies": {
+        "@tailwindcss/vite": "^4.0.0",
+        "@vitejs/plugin-vue": "^6.0.7",
+        "concurrently": "^9.0.1",
+        "laravel-echo-server": "^1.6.3",
+        "laravel-vite-plugin": "^3.1",
+        "tailwindcss": "^4.0.0",
+        "vite": "^8.0.0"
+    },
+    "dependencies": {
+        "laravel-echo": "^2.3.7",
+        "socket.io-client": "^2.4.0",
+        "vue": "^3.5.39"
+    }
+}
