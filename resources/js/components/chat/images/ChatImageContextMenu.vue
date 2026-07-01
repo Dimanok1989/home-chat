@@ -1,5 +1,7 @@
 <script setup>
-defineProps({
+import { nextTick, ref, watch } from 'vue';
+
+const props = defineProps({
     contextMenu: {
         type: Object,
         default: null,
@@ -7,13 +9,59 @@ defineProps({
 });
 
 const emit = defineEmits(['copy', 'delete']);
+
+const menuRef = ref(null);
+const menuStyle = ref({ left: '0px', top: '0px', visibility: 'hidden' });
+
+watch(() => props.contextMenu, async (menu) => {
+    if (!menu) {
+        return;
+    }
+
+    menuStyle.value = {
+        left: `${menu.x}px`,
+        top: `${menu.y}px`,
+        visibility: 'hidden',
+    };
+
+    await nextTick();
+
+    const el = menuRef.value;
+
+    if (!el) {
+        return;
+    }
+
+    const padding = 8;
+    const rect = el.getBoundingClientRect();
+    let left = menu.x;
+    let top = menu.y;
+
+    if (left + rect.width > window.innerWidth - padding) {
+        left = menu.x - rect.width;
+    }
+
+    if (top + rect.height > window.innerHeight - padding) {
+        top = window.innerHeight - rect.height - padding;
+    }
+
+    left = Math.max(padding, Math.min(left, window.innerWidth - rect.width - padding));
+    top = Math.max(padding, Math.min(top, window.innerHeight - rect.height - padding));
+
+    menuStyle.value = {
+        left: `${left}px`,
+        top: `${top}px`,
+        visibility: 'visible',
+    };
+});
 </script>
 
 <template>
     <div
         v-if="contextMenu"
+        ref="menuRef"
         class="fixed z-[60] min-w-[200px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-600 dark:bg-gray-800"
-        :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+        :style="menuStyle"
     >
         <button
             v-if="contextMenu.imageUrl"
@@ -58,7 +106,7 @@ const emit = defineEmits(['copy', 'delete']);
                 <line x1="10" y1="11" x2="10" y2="17" />
                 <line x1="14" y1="11" x2="14" y2="17" />
             </svg>
-            Удалить сообщение
+            Удалить
         </button>
     </div>
 </template>

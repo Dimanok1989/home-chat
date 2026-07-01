@@ -88,7 +88,7 @@ onUnmounted(() => {
 
         <div
             v-if="menuOpen"
-            class="absolute left-0 z-20 mt-1 w-48 rounded-xl border border-gray-100 bg-white px-1 py-2 shadow-xl dark:border-gray-800 dark:bg-gray-900"
+            class="absolute left-0 z-20 mt-1 w-48 py-1 rounded-2xl border border-gray-100 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900"
         >
             <ChatSidebarMenuProfileItem
                 :avatar-url="avatarUrl"
@@ -96,6 +96,7 @@ onUnmounted(() => {
                 :initial="avatarInitial"
                 @click="handleOpenProfile"
             />
+            <hr class="my-1 border-t border-gray-100 dark:border-gray-800"/>
             <ChatSidebarMenuThemeItem
                 :is-dark="isDark"
                 @click="handleToggleTheme"

@@ -272,7 +272,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <aside class="flex h-full w-full shrink-0 flex-col bg-white dark:bg-gray-900 md:my-3 md:mx-2 md:h-auto md:w-80 md:rounded-lg md:border md:border-gray-100 dark:md:border-gray-800">
+    <aside class="flex h-full w-full shrink-0 flex-col bg-white dark:bg-gray-900 md:my-3 md:mx-2 md:h-auto md:w-90 md:rounded-lg md:border md:border-gray-100 dark:md:border-gray-800">
         <div class="border-b border-gray-100 p-3 dark:border-gray-800 md:hidden">
             <h1 class="text-lg font-semibold">{{ sidebarView === 'profile' ? 'Профиль' : 'Чаты' }}</h1>
         </div>
