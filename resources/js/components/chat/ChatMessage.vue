@@ -48,7 +48,7 @@ function handleMessageContextMenu(event) {
         <div
             v-if="isSystemMessage(message)"
             :title="formatDateTime(message.created_at)"
-            class="max-w-[85%] cursor-default rounded-3xl bg-gray-200 px-5 py-3 text-center text-sm text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+            class="max-w-[85%] cursor-default rounded-3xl bg-gray-600/10 px-5 py-3 text-center text-sm text-gray-700 dark:bg-gray-700/30 dark:text-gray-300"
         >
             <div
                 v-if="message.attachments?.length"
@@ -80,7 +80,7 @@ function handleMessageContextMenu(event) {
             :class="[
                 message.is_mine
                     ? 'bg-blue-600 text-white'
-                    : 'border border-gray-200 bg-white text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100',
+                    : 'border border-gray-100 bg-white text-gray-900 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-100',
                 messageCanDelete(message) ? 'cursor-context-menu' : '',
             ]"
             @contextmenu.prevent="handleMessageContextMenu"

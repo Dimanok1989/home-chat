@@ -103,7 +103,7 @@ function handleRoomClick(roomId) {
 </script>
 
 <template>
-    <aside class="my-3 ml-2 flex w-72 shrink-0 flex-col rounded-lg border border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900">
+    <aside class="my-3 ml-2 flex w-80 shrink-0 flex-col rounded-lg border border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900">
         <div class="border-b border-gray-200 p-3 dark:border-gray-700">
             <input
                 v-model="searchQuery"

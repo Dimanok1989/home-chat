@@ -12,7 +12,7 @@ defineProps({
 <template>
     <div class="flex justify-center py-1">
         <span
-            class="rounded-full bg-gray-500/15 px-3 py-1 text-xs text-gray-600 dark:bg-gray-400/15 dark:text-gray-300"
+            class="rounded-full bg-gray-500/15 px-3 py-1 text-xs font-bold text-gray-600 dark:bg-gray-400/15 dark:text-gray-300"
         >
             {{ formatDate(date) }}
         </span>
