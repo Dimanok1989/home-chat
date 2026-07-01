@@ -22,6 +22,7 @@ class MessageController extends Controller
         /** @var User $user */
         $user = Auth::user();
         $room = $this->resolveAccessibleRoom($request);
+        $clearedAt = $room->clearedAtForUser($user->id);
 
         $currentUserId = $user->id;
         $limit = min(max((int) $request->query('limit', 40), 1), 100);
@@ -29,6 +30,10 @@ class MessageController extends Controller
 
         $query = Message::query()
             ->where('chat_room_id', $room->id);
+
+        if ($clearedAt !== null) {
+            $query->where('created_at', '>', $clearedAt);
+        }
 
         if ($beforeId !== null && $beforeId !== '') {
             $query->where('id', '<', (int) $beforeId);
@@ -61,7 +66,8 @@ class MessageController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'room_id' => ['required', 'integer', 'exists:chat_rooms,id'],
+            'room_id' => ['nullable', 'integer', 'exists:chat_rooms,id', 'required_without:user_id'],
+            'user_id' => ['nullable', 'integer', 'exists:users,id', 'required_without:room_id'],
             'body' => ['nullable', 'string', 'max:1000'],
             'image' => ['nullable', 'image', 'max:5120'],
             'reply_to_id' => ['nullable', 'integer', 'exists:messages,id'],
@@ -69,10 +75,29 @@ class MessageController extends Controller
 
         /** @var User $user */
         $user = Auth::user();
-        $room = ChatRoom::query()->findOrFail((int) $validated['room_id']);
+
+        if (isset($validated['user_id'])) {
+            $targetUserId = (int) $validated['user_id'];
+
+            if ($targetUserId === $user->id) {
+                throw ValidationException::withMessages([
+                    'user_id' => ['Нельзя создать диалог с самим собой.'],
+                ]);
+            }
+
+            $room = ChatRoom::findOrCreateDirect($user->id, $targetUserId);
+        } else {
+            $room = ChatRoom::query()->findOrFail((int) $validated['room_id']);
+        }
 
         if (! $room->isAccessibleBy($user)) {
-            abort(403);
+            if (isset($validated['user_id'])) {
+                $room->users()->syncWithoutDetaching([$user->id, (int) $validated['user_id']]);
+            }
+        }
+
+        if (! $room->isAccessibleBy($user)) {
+            abort(403, 'Нет доступа к этому чату.');
         }
 
         $body = isset($validated['body']) ? trim($validated['body']) : '';
@@ -88,10 +113,12 @@ class MessageController extends Controller
 
         if ($replyToId !== null) {
             $replyTo = Message::query()->find($replyToId);
+            $clearedAt = $room->clearedAtForUser($user->id);
 
             if ($replyTo === null
                 || $replyTo->chat_room_id !== $room->id
-                || $replyTo->user_id === null) {
+                || $replyTo->user_id === null
+                || ($clearedAt !== null && $replyTo->created_at <= $clearedAt)) {
                 throw ValidationException::withMessages([
                     'reply_to_id' => ['Нельзя ответить на это сообщение.'],
                 ]);
@@ -135,9 +162,16 @@ class MessageController extends Controller
 
         broadcast(new MessageSent($message));
 
-        return response()->json([
+        $response = [
             'message' => $this->formatMessage($message, $currentUserId),
-        ], 201);
+        ];
+
+        if (isset($validated['user_id'])) {
+            $room->load(['users']);
+            $response['room'] = $room->toApiArray($user);
+        }
+
+        return response()->json($response, 201);
     }
 
     public function destroy(Message $message): JsonResponse

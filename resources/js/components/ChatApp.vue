@@ -1,17 +1,20 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useMediaQuery } from '../composables/useMediaQuery';
+import { useToast } from '../composables/useToast';
 import { buildMessagePreview } from '../utils/chatFormat';
 import ChatConfirmModal from './chat/modals/ChatConfirmModal.vue';
 import ChatCreateGroupModal from './chat/modals/ChatCreateGroupModal.vue';
 import ChatDragOverlay from './chat/images/ChatDragOverlay.vue';
 import ChatImageContextMenu from './chat/images/ChatImageContextMenu.vue';
+import ChatRoomContextMenu from './chat/sidebar/ChatRoomContextMenu.vue';
 import ChatImageViewer from './chat/images/ChatImageViewer.vue';
 import ChatMessageInput from './chat/messages/ChatMessageInput.vue';
 import ChatMessageList from './chat/messages/ChatMessageList.vue';
 import ChatSendImageModal from './chat/images/ChatSendImageModal.vue';
 import ChatSidebar from './chat/sidebar/ChatSidebar.vue';
 import ChatSpinner from './chat/shared/ChatSpinner.vue';
+import ChatToast from './chat/shared/ChatToast.vue';
 
 const MESSAGES_PAGE_SIZE = 40;
 
@@ -39,6 +42,7 @@ const showSendModal = ref(false);
 const viewerOpen = ref(false);
 const viewerIndex = ref(0);
 const contextMenu = ref(null);
+const roomContextMenu = ref(null);
 const replyingTo = ref(null);
 const highlightedMessageId = ref(null);
 let highlightTimeout = null;
@@ -47,14 +51,39 @@ const deleteConfirm = ref({
     messageId: null,
     deleting: false,
 });
+const roomDeleteConfirm = ref({
+    show: false,
+    roomId: null,
+    deleting: false,
+});
 const isDragging = ref(false);
 const showCreateGroupModal = ref(false);
 const creatingGroup = ref(false);
 const groupError = ref('');
 const isMobile = useMediaQuery('(max-width: 767px)');
 const mobileChatOpen = ref(false);
+const pendingDirectUser = ref(null);
 
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+const { message: toastMessage, visible: toastVisible, showError: showToastError, hide: hideToast } = useToast();
+
+function parseApiError(data, fallback) {
+    if (data?.errors) {
+        const messages = Object.values(data.errors).flat();
+
+        if (messages.length > 0) {
+            return messages.join(' ');
+        }
+    }
+
+    return data?.message ?? fallback;
+}
+
+function notifyError(message, fallback = 'Произошла ошибка') {
+    const text = message ?? fallback;
+    showToastError(text);
+    error.value = text;
+}
 
 const CHAT_BASE_PATH = '/chat';
 
@@ -94,7 +123,23 @@ function isKnownRoom(roomId) {
     return rooms.value.some((room) => room.id === roomId);
 }
 
-const activeRoom = computed(() => rooms.value.find((room) => room.id === activeRoomId.value) ?? null);
+const activeRoom = computed(() => {
+    if (activeRoomId.value) {
+        return rooms.value.find((room) => room.id === activeRoomId.value) ?? null;
+    }
+
+    if (pendingDirectUser.value) {
+        return {
+            type: 'direct',
+            title: pendingDirectUser.value.display_name,
+            peer: pendingDirectUser.value,
+        };
+    }
+
+    return null;
+});
+
+const isChatOpen = computed(() => Boolean(activeRoomId.value || pendingDirectUser.value));
 
 const roomOnline = computed(() => {
     const result = {};
@@ -299,7 +344,7 @@ async function loadMessages(roomId = activeRoomId.value) {
         messages.value = data.messages.map(mapMessage);
         hasMoreOlder.value = data.has_more;
     } catch (err) {
-        error.value = err.message ?? 'Не удалось загрузить сообщения';
+        notifyError(err.message, 'Не удалось загрузить сообщения');
     } finally {
         await nextTick();
         initialLoadDone.value = true;
@@ -357,9 +402,23 @@ function removeRoomPresenceUser(roomId, user) {
 }
 
 function handleMessageSent(payload) {
+    const roomId = Number(payload.chat_room_id);
+
+    if (!rooms.value.some((item) => item.id === roomId)) {
+        void loadRooms().then(() => {
+            updateRoomPreview(payload);
+
+            if (roomId === activeRoomId.value) {
+                appendMessage(payload);
+            }
+        });
+
+        return;
+    }
+
     updateRoomPreview(payload);
 
-    if (Number(payload.chat_room_id) === activeRoomId.value) {
+    if (roomId === activeRoomId.value) {
         appendMessage(payload);
     }
 }
@@ -443,7 +502,7 @@ function subscribeRoomPresence(roomId) {
         .listen('.ProfileUpdated', handleProfileUpdated)
         .error((err) => {
             console.error('Echo presence error', err);
-            error.value = 'Ошибка подключения к чату';
+            notifyError('Ошибка подключения к чату');
         });
 }
 
@@ -464,6 +523,7 @@ function leaveAllRoomChannels() {
 
 function closeActiveRoom() {
     activeRoomId.value = null;
+    pendingDirectUser.value = null;
     messages.value = [];
     hasMoreOlder.value = true;
     initialLoadDone.value = true;
@@ -477,6 +537,7 @@ async function openRoom(roomId, { updateUrl = false, replaceUrl = false } = {}) 
         return false;
     }
 
+    pendingDirectUser.value = null;
     const isSameRoom = roomId === activeRoomId.value;
 
     if (!isSameRoom) {
@@ -503,6 +564,12 @@ async function openRoom(roomId, { updateUrl = false, replaceUrl = false } = {}) 
 
 function goBackToMenu() {
     if (isMobile.value && mobileChatOpen.value) {
+        if (pendingDirectUser.value || getRoomIdFromUrl() === null) {
+            closeActiveRoom();
+            syncUrlWithRoom(null, { replace: true });
+            return;
+        }
+
         history.back();
     }
 }
@@ -536,8 +603,56 @@ async function selectRoom(roomId) {
     }
 }
 
-async function startDirect(userId) {
+function mapSearchUserToPeer(user) {
+    const name = user.name ?? '';
+
+    return {
+        id: user.id,
+        display_name: name,
+        has_avatar: false,
+        avatar_url: null,
+        initial: name ? name.charAt(0).toUpperCase() : '?',
+    };
+}
+
+function openPendingDirectChat(user) {
+    pendingDirectUser.value = mapSearchUserToPeer(user);
+    activeRoomId.value = null;
+    messages.value = [];
+    hasMoreOlder.value = false;
+    initialLoadDone.value = true;
     error.value = '';
+    clearReply();
+    syncUrlWithRoom(null, { replace: true });
+
+    if (isMobile.value) {
+        mobileChatOpen.value = true;
+    }
+}
+
+function activateRoomFromSend(data) {
+    if (!data.room) {
+        return;
+    }
+
+    pendingDirectUser.value = null;
+    upsertRoom(data.room);
+    activeRoomId.value = data.room.id;
+    syncUrlWithRoom(data.room.id, { replace: true });
+}
+
+async function startDirect(user) {
+    error.value = '';
+    const userId = Number(user.id);
+
+    const existing = rooms.value.find(
+        (room) => room.type === 'direct' && Number(room.peer?.id) === userId,
+    );
+
+    if (existing) {
+        await selectRoom(existing.id);
+        return;
+    }
 
     try {
         const response = await fetch('/api/chat-rooms/direct', {
@@ -551,19 +666,25 @@ async function startDirect(userId) {
             body: JSON.stringify({ user_id: userId }),
         });
 
-        if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            const validationError = data.errors
-                ? Object.values(data.errors).flat().join(' ')
-                : null;
-            throw new Error(validationError ?? data.message ?? 'Не удалось открыть диалог');
+        if (response.ok) {
+            const data = await response.json();
+            upsertRoom(data.room);
+            await selectRoom(data.room.id);
+            return;
         }
 
-        const data = await response.json();
-        upsertRoom(data.room);
-        await selectRoom(data.room.id);
+        if (response.status === 404) {
+            openPendingDirectChat(user);
+            return;
+        }
+
+        const data = await response.json().catch(() => ({}));
+        const validationError = data.errors
+            ? Object.values(data.errors).flat().join(' ')
+            : null;
+        throw new Error(validationError ?? data.message ?? 'Не удалось открыть диалог');
     } catch (err) {
-        error.value = err.message ?? 'Не удалось открыть диалог';
+        notifyError(err.message, 'Не удалось открыть диалог');
     }
 }
 
@@ -610,7 +731,9 @@ async function createGroup({ name, userIds }) {
         showCreateGroupModal.value = false;
         await selectRoom(data.room.id);
     } catch (err) {
-        groupError.value = err.message ?? 'Не удалось создать группу';
+        const message = err.message ?? 'Не удалось создать группу';
+        groupError.value = message;
+        notifyError(message, 'Не удалось создать группу');
     } finally {
         creatingGroup.value = false;
     }
@@ -649,7 +772,7 @@ async function loadOlderMessages() {
 
         hasMoreOlder.value = data.has_more;
     } catch (err) {
-        error.value = err.message ?? 'Не удалось загрузить старые сообщения';
+        notifyError(err.message, 'Не удалось загрузить старые сообщения');
     } finally {
         loadingOlder.value = false;
     }
@@ -672,12 +795,23 @@ function handleMessagesScroll() {
 async function sendMessage() {
     const body = newMessage.value.trim();
 
-    if (!body || sending.value || !activeRoomId.value) {
+    if (!body || sending.value || !isChatOpen.value) {
         return;
     }
 
     sending.value = true;
     error.value = '';
+
+    const payload = {
+        body,
+        reply_to_id: replyingTo.value?.id ?? null,
+    };
+
+    if (activeRoomId.value) {
+        payload.room_id = activeRoomId.value;
+    } else if (pendingDirectUser.value) {
+        payload.user_id = pendingDirectUser.value.id;
+    }
 
     try {
         const response = await fetch('/api/messages', {
@@ -688,24 +822,21 @@ async function sendMessage() {
                 'X-CSRF-TOKEN': csrfToken,
             },
             credentials: 'same-origin',
-            body: JSON.stringify({
-                body,
-                room_id: activeRoomId.value,
-                reply_to_id: replyingTo.value?.id ?? null,
-            }),
+            body: JSON.stringify(payload),
         });
 
         if (!response.ok) {
             const data = await response.json().catch(() => ({}));
-            throw new Error(data.message ?? 'Не удалось отправить сообщение');
+            throw new Error(parseApiError(data, 'Не удалось отправить сообщение'));
         }
 
         const data = await response.json();
+        activateRoomFromSend(data);
         appendMessage(data.message);
         newMessage.value = '';
         clearReply();
     } catch (err) {
-        error.value = err.message ?? 'Ошибка отправки';
+        notifyError(err.message, 'Ошибка отправки');
     } finally {
         sending.value = false;
     }
@@ -713,7 +844,7 @@ async function sendMessage() {
 
 function openSendModal(file) {
     if (!file || !file.type.startsWith('image/')) {
-        error.value = 'Можно прикрепить только изображение';
+        notifyError('Можно прикрепить только изображение');
         return;
     }
 
@@ -737,7 +868,7 @@ function closeSendModal() {
 }
 
 async function sendMessageWithImage() {
-    if (!pendingImage.value || sending.value || !activeRoomId.value) {
+    if (!pendingImage.value || sending.value || !isChatOpen.value) {
         return;
     }
 
@@ -746,7 +877,12 @@ async function sendMessageWithImage() {
 
     const formData = new FormData();
     formData.append('image', pendingImage.value);
-    formData.append('room_id', String(activeRoomId.value));
+
+    if (activeRoomId.value) {
+        formData.append('room_id', String(activeRoomId.value));
+    } else if (pendingDirectUser.value) {
+        formData.append('user_id', String(pendingDirectUser.value.id));
+    }
 
     const body = modalText.value.trim();
 
@@ -771,18 +907,16 @@ async function sendMessageWithImage() {
 
         if (!response.ok) {
             const data = await response.json().catch(() => ({}));
-            const validationError = data.errors
-                ? Object.values(data.errors).flat().join(' ')
-                : null;
-            throw new Error(validationError ?? data.message ?? 'Не удалось отправить сообщение');
+            throw new Error(parseApiError(data, 'Не удалось отправить сообщение'));
         }
 
         const data = await response.json();
+        activateRoomFromSend(data);
         appendMessage(data.message);
         closeSendModal();
         clearReply();
     } catch (err) {
-        error.value = err.message ?? 'Ошибка отправки';
+        notifyError(err.message, 'Ошибка отправки');
     } finally {
         sending.value = false;
     }
@@ -903,6 +1037,8 @@ function handleViewerKeydown(event) {
 }
 
 function showContextMenu(event, payload) {
+    hideRoomContextMenu();
+
     const message = payload?.message ?? null;
 
     contextMenu.value = {
@@ -933,7 +1069,7 @@ function showContextMenuFromViewer(event, image) {
 }
 
 function replyToMessage(message) {
-    hideContextMenu();
+    hideAllContextMenus();
     replyingTo.value = message;
 
     nextTick(() => {
@@ -998,6 +1134,30 @@ function hideContextMenu() {
     contextMenu.value = null;
 }
 
+function showRoomContextMenu(event, room) {
+    if (room?.type !== 'direct') {
+        return;
+    }
+
+    hideContextMenu();
+
+    roomContextMenu.value = {
+        x: event.clientX,
+        y: event.clientY,
+        roomId: room.id,
+        canDelete: true,
+    };
+}
+
+function hideRoomContextMenu() {
+    roomContextMenu.value = null;
+}
+
+function hideAllContextMenus() {
+    hideContextMenu();
+    hideRoomContextMenu();
+}
+
 function removeMessage(messageId) {
     messages.value = messages.value.filter((item) => item.id !== messageId);
 
@@ -1013,7 +1173,7 @@ function removeMessage(messageId) {
 }
 
 function deleteMessage(messageId) {
-    hideContextMenu();
+    hideAllContextMenus();
 
     deleteConfirm.value = {
         show: true,
@@ -1067,13 +1227,13 @@ async function confirmDeleteMessage() {
             deleting: false,
         };
     } catch (err) {
-        error.value = err.message ?? 'Ошибка удаления';
+        notifyError(err.message, 'Ошибка удаления');
         deleteConfirm.value.deleting = false;
     }
 }
 
 async function copyImageToClipboard(url) {
-    hideContextMenu();
+    hideAllContextMenus();
 
     try {
         const response = await fetch(url, { credentials: 'same-origin' });
@@ -1090,7 +1250,76 @@ async function copyImageToClipboard(url) {
             }),
         ]);
     } catch (err) {
-        error.value = err.message ?? 'Не удалось скопировать изображение';
+        notifyError(err.message, 'Не удалось скопировать изображение');
+    }
+}
+
+function deleteRoom(roomId) {
+    hideAllContextMenus();
+
+    roomDeleteConfirm.value = {
+        show: true,
+        roomId,
+        deleting: false,
+    };
+}
+
+function closeRoomDeleteConfirm() {
+    if (roomDeleteConfirm.value.deleting) {
+        return;
+    }
+
+    roomDeleteConfirm.value = {
+        show: false,
+        roomId: null,
+        deleting: false,
+    };
+}
+
+function removeRoomFromList(roomId) {
+    rooms.value = rooms.value.filter((item) => item.id !== roomId);
+}
+
+async function confirmDeleteRoom() {
+    const roomId = roomDeleteConfirm.value.roomId;
+
+    if (!roomId || roomDeleteConfirm.value.deleting) {
+        return;
+    }
+
+    roomDeleteConfirm.value.deleting = true;
+
+    try {
+        const response = await fetch(`/api/chat-rooms/${roomId}`, {
+            method: 'DELETE',
+            headers: {
+                Accept: 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+            },
+            credentials: 'same-origin',
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.message ?? 'Не удалось удалить чат');
+        }
+
+        const data = await response.json();
+        removeRoomFromList(data.id);
+
+        if (activeRoomId.value === data.id) {
+            closeActiveRoom();
+            syncUrlWithRoom(null, { replace: true });
+        }
+
+        roomDeleteConfirm.value = {
+            show: false,
+            roomId: null,
+            deleting: false,
+        };
+    } catch (err) {
+        notifyError(err.message, 'Ошибка удаления');
+        roomDeleteConfirm.value.deleting = false;
     }
 }
 
@@ -1100,13 +1329,13 @@ watch(viewerOpen, (open) => {
 
 watch(isMobile, (mobile) => {
     if (mobile) {
-        mobileChatOpen.value = Boolean(activeRoomId.value);
+        mobileChatOpen.value = Boolean(activeRoomId.value || pendingDirectUser.value);
         syncUrlWithRoom(activeRoomId.value, { replace: true });
     }
 });
 
 onMounted(async () => {
-    document.addEventListener('click', hideContextMenu);
+    document.addEventListener('click', hideAllContextMenus);
     document.addEventListener('keydown', handleViewerKeydown);
     document.addEventListener('paste', handlePaste);
     window.addEventListener('popstate', handlePopState);
@@ -1128,14 +1357,14 @@ onMounted(async () => {
             initialLoadDone.value = true;
         }
     } catch (err) {
-        error.value = err.message ?? 'Ошибка инициализации чата';
+        notifyError(err.message, 'Ошибка инициализации чата');
     } finally {
         appReady.value = true;
     }
 });
 
 onUnmounted(() => {
-    document.removeEventListener('click', hideContextMenu);
+    document.removeEventListener('click', hideAllContextMenus);
     document.removeEventListener('keydown', handleViewerKeydown);
     document.removeEventListener('paste', handlePaste);
     window.removeEventListener('popstate', handlePopState);
@@ -1171,6 +1400,7 @@ onUnmounted(() => {
             @select-room="selectRoom"
             @start-direct="startDirect"
             @open-create-group="openCreateGroupModal"
+            @show-room-context-menu="showRoomContextMenu"
         />
 
         <main
@@ -1186,7 +1416,7 @@ onUnmounted(() => {
             <ChatDragOverlay :visible="isDragging" />
 
             <header
-                v-if="activeRoomId"
+                v-if="isChatOpen"
                 class="z-20 mx-auto flex w-full max-w-250 shrink-0 items-center border-b border-gray-100 bg-white px-4 py-4 pt-[max(1rem,env(safe-area-inset-top))] dark:border-gray-800 dark:bg-gray-900 md:rounded-b-lg md:border-l md:border-r md:px-6 md:pt-4"
             >
                 <div class="flex min-w-0 items-center gap-2">
@@ -1216,7 +1446,7 @@ onUnmounted(() => {
             </header>
 
             <div
-                v-if="!activeRoomId"
+                v-if="!isChatOpen"
                 class="flex flex-1 items-center justify-center px-4 text-center text-gray-500 dark:text-gray-400"
             >
                 <p class="text-sm">Выберите чат из списка{{ isMobile ? '' : ' слева' }}</p>
@@ -1261,6 +1491,12 @@ onUnmounted(() => {
         </main>
 
         <Teleport to="body">
+            <ChatToast
+                :message="toastMessage"
+                :visible="toastVisible"
+                @close="hideToast"
+            />
+
             <ChatCreateGroupModal
                 :show="showCreateGroupModal"
                 :creating="creatingGroup"
@@ -1279,6 +1515,16 @@ onUnmounted(() => {
                 @confirm="confirmDeleteMessage"
             />
 
+            <ChatConfirmModal
+                :show="roomDeleteConfirm.show"
+                title="Удалить чат"
+                message="Чат будет удалён только у вас. Собеседник по-прежнему увидит переписку. История сообщений до удаления не будет показана, если вы снова начнёте беседу."
+                confirm-label="Удалить"
+                :loading="roomDeleteConfirm.deleting"
+                @close="closeRoomDeleteConfirm"
+                @confirm="confirmDeleteRoom"
+            />
+
             <ChatSendImageModal
                 :show="showSendModal"
                 :preview-url="pendingPreviewUrl"
@@ -1294,6 +1540,11 @@ onUnmounted(() => {
                 @copy="copyImageToClipboard"
                 @delete="deleteMessage"
                 @reply="replyToMessage"
+            />
+
+            <ChatRoomContextMenu
+                :context-menu="roomContextMenu"
+                @delete="deleteRoom"
             />
 
             <ChatImageViewer

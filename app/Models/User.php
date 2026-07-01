@@ -35,6 +35,7 @@ class User extends Authenticatable
     public function chatRooms(): BelongsToMany
     {
         return $this->belongsToMany(ChatRoom::class, 'chat_room_user')
+            ->withPivot('cleared_at')
             ->withTimestamps();
     }
 

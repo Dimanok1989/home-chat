@@ -21,7 +21,7 @@ const props = defineProps({
     },
 });
 
-const emit = defineEmits(['selectRoom', 'startDirect', 'openCreateGroup']);
+const emit = defineEmits(['selectRoom', 'startDirect', 'openCreateGroup', 'showRoomContextMenu']);
 
 const { isDark, toggleTheme } = useTheme();
 
@@ -136,11 +136,19 @@ watch(searchQuery, (value) => {
 function handleUserClick(user) {
     searchQuery.value = '';
     searchResults.value = [];
-    emit('startDirect', user.id);
+    emit('startDirect', user);
 }
 
 function handleRoomClick(roomId) {
     emit('selectRoom', roomId);
+}
+
+function handleRoomContextMenu(event, room) {
+    if (room.type !== 'direct') {
+        return;
+    }
+
+    emit('showRoomContextMenu', event, room);
 }
 
 function handleToggleTheme() {
@@ -364,10 +372,14 @@ onUnmounted(() => {
                             <button
                                 type="button"
                                 class="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors"
-                                :class="room.id === activeRoomId
-                                    ? 'bg-blue-50 dark:bg-blue-950/40'
-                                    : 'hover:bg-gray-100 dark:hover:bg-gray-800'"
+                                :class="[
+                                    room.id === activeRoomId
+                                        ? 'bg-blue-50 dark:bg-blue-950/40'
+                                        : 'hover:bg-gray-100 dark:hover:bg-gray-800',
+                                    room.type === 'direct' ? 'cursor-context-menu' : '',
+                                ]"
                                 @click="handleRoomClick(room.id)"
+                                @contextmenu.prevent="handleRoomContextMenu($event, room)"
                             >
                                 <ChatUserAvatar
                                     :avatar-url="roomAvatar(room).avatarUrl"

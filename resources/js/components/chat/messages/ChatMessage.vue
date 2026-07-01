@@ -92,7 +92,9 @@ function handleMessageContextMenu(event) {
                     ? 'bg-blue-200 text-gray-900 dark:bg-blue-900 dark:text-gray-100'
                     : 'border border-gray-100 bg-white text-gray-900 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-100',
                 messageCanShowContextMenu(message) ? 'cursor-context-menu' : '',
-                highlighted ? 'message-bubble-highlight' : '',
+                highlighted
+                    ? (message.is_mine ? 'message-bubble-highlight-mine' : 'message-bubble-highlight-other')
+                    : '',
             ]"
             @contextmenu.prevent="handleMessageContextMenu"
         >
@@ -140,17 +142,59 @@ function handleMessageContextMenu(event) {
 </template>
 
 <style scoped>
-.message-bubble-highlight {
-    animation: message-highlight 2s ease-out;
+.message-bubble-highlight-mine {
+    animation: message-highlight-mine 2s ease-out;
 }
 
-@keyframes message-highlight {
+.message-bubble-highlight-other {
+    animation: message-highlight-other 2s ease-out;
+}
+
+@keyframes message-highlight-mine {
     0%, 20% {
-        box-shadow: 0 0 0 3px rgb(59 130 246 / 0.55);
+        background-color: rgb(147 197 253);
     }
 
     100% {
-        box-shadow: 0 0 0 0 rgb(59 130 246 / 0);
+        background-color: rgb(191 219 254);
+    }
+}
+
+@keyframes message-highlight-other {
+    0%, 20% {
+        background-color: rgb(219 234 254);
+    }
+
+    100% {
+        background-color: rgb(255 255 255);
+    }
+}
+
+:global(.dark) .message-bubble-highlight-mine {
+    animation: message-highlight-mine-dark 2s ease-out;
+}
+
+:global(.dark) .message-bubble-highlight-other {
+    animation: message-highlight-other-dark 2s ease-out;
+}
+
+@keyframes message-highlight-mine-dark {
+    0%, 20% {
+        background-color: rgb(37 99 235);
+    }
+
+    100% {
+        background-color: rgb(30 58 138);
+    }
+}
+
+@keyframes message-highlight-other-dark {
+    0%, 20% {
+        background-color: rgb(30 64 175);
+    }
+
+    100% {
+        background-color: rgb(31 41 55);
     }
 }
 </style>

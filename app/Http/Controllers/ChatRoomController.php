@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\ChatRoom;
-use App\Models\Message;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,19 +18,14 @@ class ChatRoomController extends Controller
 
         $rooms = ChatRoom::query()
             ->forUser($user->id)
-            ->with([
-                'users',
-                'messages' => fn ($query) => $query
-                    ->with(['attachments', 'user'])
-                    ->latest('id')
-                    ->limit(1),
-            ])
+            ->visibleForUser($user->id)
+            ->with(['users'])
             ->orderByRaw('COALESCE(last_message_at, created_at) DESC')
             ->orderByDesc('id')
             ->get();
 
         return response()->json([
-            'rooms' => $rooms->map(fn (ChatRoom $room) => $this->formatRoom($room, $user))->values()->all(),
+            'rooms' => $rooms->map(fn (ChatRoom $room) => $room->toApiArray($user))->values()->all(),
         ]);
     }
 
@@ -51,7 +45,23 @@ class ChatRoomController extends Controller
             ]);
         }
 
-        $room = ChatRoom::findOrCreateDirect($user->id, $targetUserId);
+        $hash = ChatRoom::directHash($user->id, $targetUserId);
+        $room = ChatRoom::query()->where('direct_hash', $hash)->first();
+
+        if ($room === null || $room->last_message_at === null) {
+            return response()->json([
+                'message' => 'Диалог не найден.',
+            ], 404);
+        }
+
+        if (! $room->isAccessibleBy($user)) {
+            $room->users()->syncWithoutDetaching([$user->id, $targetUserId]);
+        }
+
+        if (! $room->isAccessibleBy($user)) {
+            abort(403, 'Нет доступа к этому чату.');
+        }
+
         $room->load([
             'users',
             'messages' => fn ($query) => $query
@@ -61,7 +71,7 @@ class ChatRoomController extends Controller
         ]);
 
         return response()->json([
-            'room' => $this->formatRoom($room, $user),
+            'room' => $room->toApiArray($user),
         ], 201);
     }
 
@@ -98,31 +108,29 @@ class ChatRoomController extends Controller
         ]);
 
         return response()->json([
-            'room' => $this->formatRoom($room, $user),
+            'room' => $room->toApiArray($user),
         ], 201);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function formatRoom(ChatRoom $room, User $user): array
+    public function destroy(ChatRoom $room): JsonResponse
     {
-        $lastMessage = $room->messages->first();
-        $peer = null;
+        /** @var User $user */
+        $user = Auth::user();
 
-        if ($room->type === ChatRoom::TYPE_DIRECT) {
-            $other = $room->users->firstWhere('id', '!=', $user->id);
-            $peer = $other?->toPeerPayload();
+        if ($room->type !== ChatRoom::TYPE_DIRECT) {
+            abort(403, 'Можно удалить только личную беседу.');
         }
 
-        return [
+        if (! $room->isAccessibleBy($user)) {
+            abort(403);
+        }
+
+        $room->users()->updateExistingPivot($user->id, [
+            'cleared_at' => now(),
+        ]);
+
+        return response()->json([
             'id' => $room->id,
-            'type' => $room->type,
-            'title' => $room->titleFor($user),
-            'peer' => $peer,
-            'last_message' => $lastMessage ? Message::previewPayload($lastMessage) : null,
-            'last_message_at' => $room->last_message_at?->toIso8601String(),
-            'created_at' => $room->created_at?->toIso8601String(),
-        ];
+        ]);
     }
 }

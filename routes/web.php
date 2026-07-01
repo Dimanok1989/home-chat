@@ -24,6 +24,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/api/chat-rooms', [ChatRoomController::class, 'index']);
     Route::post('/api/chat-rooms/direct', [ChatRoomController::class, 'storeDirect']);
     Route::post('/api/chat-rooms/group', [ChatRoomController::class, 'storeGroup']);
+    Route::delete('/api/chat-rooms/{room}', [ChatRoomController::class, 'destroy']);
     Route::get('/api/users/search', [UserSearchController::class, 'index']);
     Route::get('/api/users/{user}/avatar', [UserAvatarController::class, 'show'])
         ->name('users.avatar');

@@ -39,6 +39,7 @@ class ChatRoom extends Model
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'chat_room_user')
+            ->withPivot('cleared_at')
             ->withTimestamps();
     }
 
@@ -57,6 +58,39 @@ class ChatRoom extends Model
             $inner->where('type', self::TYPE_GLOBAL)
                 ->orWhereHas('users', fn (Builder $users) => $users->where('users.id', $userId));
         });
+    }
+
+    /**
+     * @param  Builder<ChatRoom>  $query
+     * @return Builder<ChatRoom>
+     */
+    public function scopeVisibleForUser(Builder $query, int $userId): Builder
+    {
+        return $query->where(function (Builder $inner) use ($userId) {
+            $inner->whereIn('type', [self::TYPE_GLOBAL, self::TYPE_GROUP])
+                ->orWhere(function (Builder $direct) use ($userId) {
+                    $direct->where('type', self::TYPE_DIRECT)
+                        ->whereNotNull('last_message_at')
+                        ->whereHas('users', function (Builder $users) use ($userId) {
+                            $users->where('users.id', $userId)
+                                ->where(function (Builder $pivot) {
+                                    $pivot->whereNull('chat_room_user.cleared_at')
+                                        ->orWhereColumn('chat_rooms.last_message_at', '>', 'chat_room_user.cleared_at');
+                                });
+                        });
+                });
+        });
+    }
+
+    public function clearedAtForUser(int $userId): ?\Illuminate\Support\Carbon
+    {
+        $pivot = $this->users()->where('users.id', $userId)->first()?->pivot;
+
+        if ($pivot?->cleared_at === null) {
+            return null;
+        }
+
+        return \Illuminate\Support\Carbon::parse($pivot->cleared_at);
     }
 
     /**
@@ -87,6 +121,8 @@ class ChatRoom extends Model
         $existing = self::query()->where('direct_hash', $hash)->first();
 
         if ($existing !== null) {
+            $existing->users()->syncWithoutDetaching([$userA, $userB]);
+
             return $existing;
         }
 
@@ -147,5 +183,41 @@ class ChatRoom extends Model
             ->first();
 
         return $other?->displayName() ?? 'Диалог';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toApiArray(User $user): array
+    {
+        $clearedAt = $this->clearedAtForUser($user->id);
+
+        $lastMessageQuery = Message::query()
+            ->where('chat_room_id', $this->id)
+            ->with(['attachments', 'user'])
+            ->latest('id')
+            ->limit(1);
+
+        if ($clearedAt !== null) {
+            $lastMessageQuery->where('created_at', '>', $clearedAt);
+        }
+
+        $lastMessage = $lastMessageQuery->first();
+        $peer = null;
+
+        if ($this->type === self::TYPE_DIRECT) {
+            $other = $this->users->firstWhere('id', '!=', $user->id);
+            $peer = $other?->toPeerPayload();
+        }
+
+        return [
+            'id' => $this->id,
+            'type' => $this->type,
+            'title' => $this->titleFor($user),
+            'peer' => $peer,
+            'last_message' => $lastMessage ? Message::previewPayload($lastMessage) : null,
+            'last_message_at' => $this->last_message_at?->toIso8601String(),
+            'created_at' => $this->created_at?->toIso8601String(),
+        ];
     }
 }
