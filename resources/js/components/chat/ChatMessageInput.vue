@@ -14,6 +14,10 @@ const props = defineProps({
         type: String,
         default: '',
     },
+    pinned: {
+        type: Boolean,
+        default: false,
+    },
 });
 
 const emit = defineEmits(['update:modelValue', 'send', 'fileSelect']);
@@ -69,7 +73,10 @@ defineExpose({
 </script>
 
 <template>
-    <div class="m-0 px-1 md:px-0.5 pt-1 pb-1 md:py-3">
+    <div
+        class="m-0 px-1 pt-1 md:px-0.5 md:py-3"
+        :class="pinned ? 'pb-[max(0.25rem,env(safe-area-inset-bottom))]' : 'pb-1'"
+    >
         <p v-if="error" class="mb-2 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
         <form @submit.prevent="emit('send')">

@@ -967,14 +967,14 @@ onUnmounted(() => {
 <template>
     <div
         v-if="!appReady"
-        class="flex h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800"
+        class="flex h-dvh items-center justify-center bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800"
     >
         <ChatSpinner size="lg" />
     </div>
 
     <div
         v-else
-        class="flex h-screen bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 text-gray-900 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800 dark:text-gray-100 md:bg-gradient-to-br"
+        class="flex h-dvh bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 text-gray-900 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800 dark:text-gray-100 md:bg-gradient-to-br"
     >
         <ChatSidebar
             v-show="!isMobile || !mobileChatOpen"
@@ -989,14 +989,17 @@ onUnmounted(() => {
 
         <main
             v-show="!isMobile || mobileChatOpen"
-            class="relative flex min-h-0 min-w-0 flex-1 flex-col"
+            class="relative flex min-h-0 min-w-0 flex-1 flex-col md:relative"
+            :class="isMobile && mobileChatOpen
+                ? 'fixed inset-0 z-10 bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800'
+                : ''"
             @dragover="handleDragOver"
             @dragleave="handleDragLeave"
             @drop="handleDrop"
         >
             <ChatDragOverlay :visible="isDragging" />
 
-            <header class="mx-auto flex w-full max-w-250 shrink-0 items-center justify-between border-b border-gray-100 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900 md:rounded-b-lg md:border-l md:border-r md:px-6">
+            <header class="z-20 mx-auto flex w-full max-w-250 shrink-0 items-center justify-between border-b border-gray-100 bg-white px-4 py-4 pt-[max(1rem,env(safe-area-inset-top))] dark:border-gray-800 dark:bg-gray-900 md:rounded-b-lg md:border-l md:border-r md:px-6 md:pt-4">
                 <div class="flex min-w-0 items-center gap-2">
                     <button
                         v-if="isMobile && mobileChatOpen"
@@ -1024,7 +1027,7 @@ onUnmounted(() => {
                 <ChatThemeToggle />
             </header>
 
-            <div class="relative flex min-h-0 flex-1 w-full flex-col items-center">
+            <div class="relative flex min-h-0 flex-1 w-full flex-col md:items-center">
                 <div
                     v-if="!initialLoadDone"
                     class="absolute inset-0 z-10 flex items-center justify-center bg-white/70 dark:bg-gray-900/70"
@@ -1032,7 +1035,7 @@ onUnmounted(() => {
                     <ChatSpinner size="md" />
                 </div>
 
-                <div class="flex h-full w-full max-w-200 flex-col">
+                <div class="flex min-h-0 flex-1 w-full flex-col md:h-full md:max-w-200">
                     <ChatMessageList
                         ref="messageListRef"
                         :messages="messages"
@@ -1042,11 +1045,14 @@ onUnmounted(() => {
                         @open-viewer="openViewer"
                         @show-context-menu="showContextMenu"
                     />
+                </div>
 
+                <div class="w-full shrink-0 border-t border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900 md:max-w-200">
                     <ChatMessageInput
                         v-model="newMessage"
                         :sending="sending"
                         :error="error"
+                        :pinned="isMobile && mobileChatOpen"
                         @send="sendMessage"
                         @file-select="handleFileSelect"
                     />
