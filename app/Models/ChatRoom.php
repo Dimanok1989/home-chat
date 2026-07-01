@@ -146,6 +146,6 @@ class ChatRoom extends Model
             ->where('users.id', '!=', $user->id)
             ->first();
 
-        return $other?->name ?? 'Диалог';
+        return $other?->displayName() ?? 'Диалог';
     }
 }

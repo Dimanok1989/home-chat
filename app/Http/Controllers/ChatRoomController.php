@@ -108,11 +108,18 @@ class ChatRoomController extends Controller
     private function formatRoom(ChatRoom $room, User $user): array
     {
         $lastMessage = $room->messages->first();
+        $peer = null;
+
+        if ($room->type === ChatRoom::TYPE_DIRECT) {
+            $other = $room->users->firstWhere('id', '!=', $user->id);
+            $peer = $other?->toPeerPayload();
+        }
 
         return [
             'id' => $room->id,
             'type' => $room->type,
             'title' => $room->titleFor($user),
+            'peer' => $peer,
             'last_message' => $lastMessage ? Message::previewPayload($lastMessage) : null,
             'last_message_at' => $room->last_message_at?->toIso8601String(),
             'created_at' => $room->created_at?->toIso8601String(),

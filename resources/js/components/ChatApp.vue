@@ -11,7 +11,6 @@ import ChatMessageList from './chat/ChatMessageList.vue';
 import ChatSendImageModal from './chat/ChatSendImageModal.vue';
 import ChatSidebar from './chat/ChatSidebar.vue';
 import ChatSpinner from './chat/ChatSpinner.vue';
-import ChatThemeToggle from './chat/ChatThemeToggle.vue';
 
 const MESSAGES_PAGE_SIZE = 40;
 
@@ -51,6 +50,44 @@ const isMobile = useMediaQuery('(max-width: 767px)');
 const mobileChatOpen = ref(false);
 
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+
+const CHAT_BASE_PATH = '/chat';
+
+function getRoomIdFromUrl() {
+    const match = window.location.pathname.match(/^\/chat\/(\d+)\/?$/);
+
+    if (!match) {
+        return null;
+    }
+
+    const id = Number(match[1]);
+
+    return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function getChatUrl(roomId = null) {
+    if (roomId) {
+        return `${CHAT_BASE_PATH}/${roomId}`;
+    }
+
+    return CHAT_BASE_PATH;
+}
+
+function syncUrlWithRoom(roomId, { replace } = {}) {
+    const url = getChatUrl(roomId);
+    const state = { roomId: roomId ?? null };
+    const shouldReplace = replace ?? getRoomIdFromUrl() !== null;
+
+    if (shouldReplace) {
+        history.replaceState(state, '', url);
+    } else {
+        history.pushState(state, '', url);
+    }
+}
+
+function isKnownRoom(roomId) {
+    return rooms.value.some((room) => room.id === roomId);
+}
 
 const activeRoom = computed(() => rooms.value.find((room) => room.id === activeRoomId.value) ?? null);
 
@@ -283,12 +320,6 @@ async function loadRooms() {
     const data = await response.json();
     rooms.value = data.rooms ?? [];
     sortRooms();
-
-    if (!activeRoomId.value && !isMobile.value) {
-        const globalRoom = rooms.value.find((room) => room.type === 'global');
-        activeRoomId.value = globalRoom?.id ?? rooms.value[0]?.id ?? null;
-    }
-
     syncRoomPresenceSubscriptions();
 }
 
@@ -382,12 +413,41 @@ function leaveAllRoomChannels() {
     roomPresenceUsers.value = {};
 }
 
-function openMobileChat() {
-    mobileChatOpen.value = true;
+function closeActiveRoom() {
+    activeRoomId.value = null;
+    messages.value = [];
+    hasMoreOlder.value = true;
+    initialLoadDone.value = true;
+    error.value = '';
+    mobileChatOpen.value = false;
+}
 
-    if (!history.state?.mobileChat) {
-        history.pushState({ mobileChat: true }, '');
+async function openRoom(roomId, { updateUrl = false, replaceUrl = false } = {}) {
+    if (!roomId || !isKnownRoom(roomId)) {
+        return false;
     }
+
+    const isSameRoom = roomId === activeRoomId.value;
+
+    if (!isSameRoom) {
+        activeRoomId.value = roomId;
+        messages.value = [];
+        hasMoreOlder.value = true;
+        initialLoadDone.value = false;
+        error.value = '';
+
+        await loadMessages(roomId);
+    }
+
+    if (updateUrl) {
+        syncUrlWithRoom(roomId, { replace: replaceUrl || getRoomIdFromUrl() !== null });
+    }
+
+    if (isMobile.value) {
+        mobileChatOpen.value = true;
+    }
+
+    return true;
 }
 
 function goBackToMenu() {
@@ -397,11 +457,14 @@ function goBackToMenu() {
 }
 
 function handlePopState() {
-    if (!isMobile.value) {
+    const roomId = getRoomIdFromUrl();
+
+    if (roomId && isKnownRoom(roomId)) {
+        void openRoom(roomId);
         return;
     }
 
-    mobileChatOpen.value = history.state?.mobileChat === true;
+    closeActiveRoom();
 }
 
 async function selectRoom(roomId) {
@@ -415,18 +478,10 @@ async function selectRoom(roomId) {
         return;
     }
 
-    if (!isSameRoom) {
-        activeRoomId.value = roomId;
-        messages.value = [];
-        hasMoreOlder.value = true;
-        initialLoadDone.value = false;
-        error.value = '';
+    const opened = await openRoom(roomId, { updateUrl: true });
 
-        await loadMessages(roomId);
-    }
-
-    if (isMobile.value) {
-        openMobileChat();
+    if (!opened) {
+        syncUrlWithRoom(null, { replace: true });
     }
 }
 
@@ -918,8 +973,8 @@ watch(viewerOpen, (open) => {
 
 watch(isMobile, (mobile) => {
     if (mobile) {
-        history.replaceState({ mobileChat: false }, '');
-        mobileChatOpen.value = false;
+        mobileChatOpen.value = Boolean(activeRoomId.value);
+        syncUrlWithRoom(activeRoomId.value, { replace: true });
     }
 });
 
@@ -929,23 +984,22 @@ onMounted(async () => {
     document.addEventListener('paste', handlePaste);
     window.addEventListener('popstate', handlePopState);
 
-    if (isMobile.value) {
-        history.replaceState({ mobileChat: false }, '');
-        mobileChatOpen.value = false;
-    }
-
     try {
         await loadRooms();
 
-        if (!isMobile.value) {
-            if (!activeRoomId.value) {
-                throw new Error('Не найдена доступная чат-комната');
+        const urlRoomId = getRoomIdFromUrl();
+
+        if (urlRoomId) {
+            const opened = await openRoom(urlRoomId, { updateUrl: true, replaceUrl: true });
+
+            if (!opened) {
+                syncUrlWithRoom(null, { replace: true });
+                initialLoadDone.value = true;
             }
-
-            await loadMessages(activeRoomId.value);
+        } else {
+            syncUrlWithRoom(null, { replace: true });
+            initialLoadDone.value = true;
         }
-
-        syncRoomPresenceSubscriptions();
     } catch (err) {
         error.value = err.message ?? 'Ошибка инициализации чата';
     } finally {
@@ -999,7 +1053,10 @@ onUnmounted(() => {
         >
             <ChatDragOverlay :visible="isDragging" />
 
-            <header class="z-20 mx-auto flex w-full max-w-250 shrink-0 items-center justify-between border-b border-gray-100 bg-white px-4 py-4 pt-[max(1rem,env(safe-area-inset-top))] dark:border-gray-800 dark:bg-gray-900 md:rounded-b-lg md:border-l md:border-r md:px-6 md:pt-4">
+            <header
+                v-if="activeRoomId"
+                class="z-20 mx-auto flex w-full max-w-250 shrink-0 items-center border-b border-gray-100 bg-white px-4 py-4 pt-[max(1rem,env(safe-area-inset-top))] dark:border-gray-800 dark:bg-gray-900 md:rounded-b-lg md:border-l md:border-r md:px-6 md:pt-4"
+            >
                 <div class="flex min-w-0 items-center gap-2">
                     <button
                         v-if="isMobile && mobileChatOpen"
@@ -1022,12 +1079,18 @@ onUnmounted(() => {
                             <path d="M12 19l-7-7 7-7" />
                         </svg>
                     </button>
-                    <h1 class="truncate text-lg font-semibold">{{ activeRoom?.title ?? 'Чат' }}</h1>
+                    <h1 class="truncate text-lg font-semibold">{{ activeRoom?.title }}</h1>
                 </div>
-                <ChatThemeToggle />
             </header>
 
-            <div class="relative flex min-h-0 flex-1 w-full flex-col md:items-center">
+            <div
+                v-if="!activeRoomId"
+                class="flex flex-1 items-center justify-center px-4 text-center text-gray-500 dark:text-gray-400"
+            >
+                <p class="text-sm">Выберите чат из списка{{ isMobile ? '' : ' слева' }}</p>
+            </div>
+
+            <div v-else class="relative flex min-h-0 flex-1 w-full flex-col md:items-center">
                 <div
                     v-if="!initialLoadDone"
                     class="absolute inset-0 z-10 flex items-center justify-center bg-white/70 dark:bg-gray-900/70"
@@ -1047,7 +1110,7 @@ onUnmounted(() => {
                     />
                 </div>
 
-                <div class="w-full shrink-0 border-t border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900 md:max-w-200">
+                <div class="w-full shrink-0 md:max-w-200">
                     <ChatMessageInput
                         v-model="newMessage"
                         :sending="sending"
