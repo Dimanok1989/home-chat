@@ -17,6 +17,7 @@ class Message extends Model
     protected $fillable = [
         'user_id',
         'chat_room_id',
+        'reply_to_id',
         'body',
     ];
 
@@ -43,6 +44,45 @@ class Message extends Model
     public function attachments(): HasMany
     {
         return $this->hasMany(MessageAttachment::class);
+    }
+
+    public function replyTo(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'reply_to_id')->withTrashed();
+    }
+
+    /**
+     * @return array{id: int, user_id: int|null, user_name: string|null, preview: string, deleted: bool}|null
+     */
+    public function replyToPayload(): ?array
+    {
+        if ($this->reply_to_id === null) {
+            return null;
+        }
+
+        $this->loadMissing(['replyTo.user', 'replyTo.attachments']);
+
+        $reply = $this->replyTo;
+
+        if ($reply === null || $reply->trashed()) {
+            return [
+                'id' => $this->reply_to_id,
+                'user_id' => null,
+                'user_name' => null,
+                'preview' => 'Сообщение удалено',
+                'deleted' => true,
+            ];
+        }
+
+        $preview = self::previewPayload($reply);
+
+        return [
+            'id' => $reply->id,
+            'user_id' => $reply->user_id,
+            'user_name' => $preview['user_name'],
+            'preview' => $preview['preview'],
+            'deleted' => false,
+        ];
     }
 
     /**

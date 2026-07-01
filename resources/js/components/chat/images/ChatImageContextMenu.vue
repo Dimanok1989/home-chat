@@ -2,6 +2,7 @@
 import { nextTick, ref, watch } from 'vue';
 import ChatImageContextMenuCopyItem from './menu/ChatImageContextMenuCopyItem.vue';
 import ChatImageContextMenuDeleteItem from './menu/ChatImageContextMenuDeleteItem.vue';
+import ChatImageContextMenuReplyItem from './menu/ChatImageContextMenuReplyItem.vue';
 
 const props = defineProps({
     contextMenu: {
@@ -10,7 +11,7 @@ const props = defineProps({
     },
 });
 
-const emit = defineEmits(['copy', 'delete']);
+const emit = defineEmits(['copy', 'delete', 'reply']);
 
 const menuRef = ref(null);
 const menuStyle = ref({ left: '0px', top: '0px', visibility: 'hidden' });
@@ -65,6 +66,16 @@ watch(() => props.contextMenu, async (menu) => {
         class="fixed z-[60] w-48 py-1 rounded-2xl border border-gray-100 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900"
         :style="menuStyle"
     >
+        <ChatImageContextMenuReplyItem
+            v-if="contextMenu.canReply"
+            @click="emit('reply', contextMenu.message)"
+        />
+
+        <hr
+            v-if="contextMenu.canReply && (contextMenu.imageUrl || contextMenu.canDelete)"
+            class="my-1 border-t border-gray-100 dark:border-gray-800"
+        />
+
         <ChatImageContextMenuCopyItem
             v-if="contextMenu.imageUrl"
             @click="emit('copy', contextMenu.imageUrl)"

@@ -18,9 +18,13 @@ const props = defineProps({
         type: Boolean,
         default: false,
     },
+    highlightedMessageId: {
+        type: Number,
+        default: null,
+    },
 });
 
-const emit = defineEmits(['scroll', 'openViewer', 'showContextMenu']);
+const emit = defineEmits(['scroll', 'openViewer', 'showContextMenu', 'scrollToMessage']);
 
 const messagesContainer = ref(null);
 
@@ -54,8 +58,10 @@ defineExpose({
         >
             <ChatMessage
                 :message="message"
+                :highlighted="highlightedMessageId === message.id"
                 @open-viewer="emit('openViewer', $event)"
                 @show-context-menu="(event, payload) => emit('showContextMenu', event, payload)"
+                @scroll-to-message="emit('scrollToMessage', $event)"
             />
 
             <ChatDateSeparator

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useMediaQuery } from '../composables/useMediaQuery';
+import { buildMessagePreview } from '../utils/chatFormat';
 import ChatConfirmModal from './chat/modals/ChatConfirmModal.vue';
 import ChatCreateGroupModal from './chat/modals/ChatCreateGroupModal.vue';
 import ChatDragOverlay from './chat/images/ChatDragOverlay.vue';
@@ -30,6 +31,7 @@ const hasMoreOlder = ref(true);
 const initialLoadDone = ref(false);
 const appReady = ref(false);
 const messageListRef = ref(null);
+const messageInputRef = ref(null);
 const modalText = ref('');
 const pendingImage = ref(null);
 const pendingPreviewUrl = ref(null);
@@ -37,6 +39,9 @@ const showSendModal = ref(false);
 const viewerOpen = ref(false);
 const viewerIndex = ref(0);
 const contextMenu = ref(null);
+const replyingTo = ref(null);
+const highlightedMessageId = ref(null);
+let highlightTimeout = null;
 const deleteConfirm = ref({
     show: false,
     messageId: null,
@@ -163,19 +168,12 @@ function getMessagesContainer() {
     return resolveExposedRef(messageListRef.value?.messagesContainer);
 }
 
-function buildMessagePreview(message) {
-    const hasAttachments = (message.attachments ?? []).length > 0;
-    const body = message.body;
+function clearReply() {
+    replyingTo.value = null;
+}
 
-    if ((!body || body === '') && hasAttachments) {
-        return 'Изображение';
-    }
-
-    if (!body) {
-        return '';
-    }
-
-    return body.length > 80 ? `${body.slice(0, 80)}…` : body;
+function cancelReply() {
+    clearReply();
 }
 
 function getRoomActivityTime(room) {
@@ -471,6 +469,7 @@ function closeActiveRoom() {
     initialLoadDone.value = true;
     error.value = '';
     mobileChatOpen.value = false;
+    clearReply();
 }
 
 async function openRoom(roomId, { updateUrl = false, replaceUrl = false } = {}) {
@@ -486,6 +485,7 @@ async function openRoom(roomId, { updateUrl = false, replaceUrl = false } = {}) 
         hasMoreOlder.value = true;
         initialLoadDone.value = false;
         error.value = '';
+        clearReply();
 
         await loadMessages(roomId);
     }
@@ -691,6 +691,7 @@ async function sendMessage() {
             body: JSON.stringify({
                 body,
                 room_id: activeRoomId.value,
+                reply_to_id: replyingTo.value?.id ?? null,
             }),
         });
 
@@ -702,6 +703,7 @@ async function sendMessage() {
         const data = await response.json();
         appendMessage(data.message);
         newMessage.value = '';
+        clearReply();
     } catch (err) {
         error.value = err.message ?? 'Ошибка отправки';
     } finally {
@@ -752,6 +754,10 @@ async function sendMessageWithImage() {
         formData.append('body', body);
     }
 
+    if (replyingTo.value?.id) {
+        formData.append('reply_to_id', String(replyingTo.value.id));
+    }
+
     try {
         const response = await fetch('/api/messages', {
             method: 'POST',
@@ -774,6 +780,7 @@ async function sendMessageWithImage() {
         const data = await response.json();
         appendMessage(data.message);
         closeSendModal();
+        clearReply();
     } catch (err) {
         error.value = err.message ?? 'Ошибка отправки';
     } finally {
@@ -903,19 +910,88 @@ function showContextMenu(event, payload) {
         y: event.clientY,
         imageUrl: payload?.imageUrl ?? null,
         messageId: message?.id ?? null,
+        message,
         canDelete: Boolean(message?.is_mine && !message?.is_system),
+        canReply: Boolean(message && !message?.is_system),
     };
 }
 
 function showContextMenuFromViewer(event, image) {
+    const message = messages.value.find((item) => item.id === image.message_id);
+
     showContextMenu(event, {
-        message: {
+        message: message ?? {
             id: image.message_id,
             is_mine: image.message_is_mine,
             is_system: image.message_is_system,
+            user_name: null,
+            body: null,
+            attachments: [{ url: image.url }],
         },
         imageUrl: image.url,
     });
+}
+
+function replyToMessage(message) {
+    hideContextMenu();
+    replyingTo.value = message;
+
+    nextTick(() => {
+        messageInputRef.value?.focusInput?.();
+    });
+}
+
+async function ensureMessageLoaded(messageId) {
+    const id = Number(messageId);
+    let attempts = 0;
+
+    while (!messages.value.some((item) => item.id === id) && hasMoreOlder.value && attempts < 50) {
+        attempts += 1;
+        await loadOlderMessages();
+    }
+
+    return messages.value.some((item) => item.id === id);
+}
+
+function highlightMessage(messageId) {
+    highlightedMessageId.value = Number(messageId);
+
+    if (highlightTimeout) {
+        clearTimeout(highlightTimeout);
+    }
+
+    highlightTimeout = setTimeout(() => {
+        highlightedMessageId.value = null;
+        highlightTimeout = null;
+    }, 2000);
+}
+
+async function scrollToMessage(messageId) {
+    const id = Number(messageId);
+
+    if (!id) {
+        return;
+    }
+
+    const found = messages.value.some((item) => item.id === id)
+        ? true
+        : await ensureMessageLoaded(id);
+
+    if (!found) {
+        return;
+    }
+
+    await nextTick();
+
+    const container = getMessagesContainer();
+    const element = container?.querySelector(`[data-message-id="${id}"]`);
+
+    if (!element) {
+        return;
+    }
+
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    highlightMessage(id);
 }
 
 function hideContextMenu() {
@@ -1064,6 +1140,11 @@ onUnmounted(() => {
     document.removeEventListener('paste', handlePaste);
     window.removeEventListener('popstate', handlePopState);
     document.body.style.overflow = '';
+
+    if (highlightTimeout) {
+        clearTimeout(highlightTimeout);
+    }
+
     closeSendModal();
     leaveAllRoomChannels();
 });
@@ -1155,20 +1236,25 @@ onUnmounted(() => {
                         :messages="messages"
                         :loading-older="loadingOlder"
                         :loading="!initialLoadDone"
+                        :highlighted-message-id="highlightedMessageId"
                         @scroll="handleMessagesScroll"
                         @open-viewer="openViewer"
                         @show-context-menu="showContextMenu"
+                        @scroll-to-message="scrollToMessage"
                     />
                 </div>
 
                 <div class="w-full shrink-0 md:max-w-200">
                     <ChatMessageInput
+                        ref="messageInputRef"
                         v-model="newMessage"
                         :sending="sending"
                         :error="error"
                         :pinned="isMobile && mobileChatOpen"
+                        :replying-to="replyingTo"
                         @send="sendMessage"
                         @file-select="handleFileSelect"
+                        @cancel-reply="cancelReply"
                     />
                 </div>
             </div>
@@ -1207,6 +1293,7 @@ onUnmounted(() => {
                 :context-menu="contextMenu"
                 @copy="copyImageToClipboard"
                 @delete="deleteMessage"
+                @reply="replyToMessage"
             />
 
             <ChatImageViewer

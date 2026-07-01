@@ -90,3 +90,18 @@ export function isSystemMessage(message) {
 
     return !message.user_name;
 }
+
+export function buildMessagePreview(message) {
+    const hasAttachments = (message?.attachments ?? []).length > 0;
+    const body = message?.body;
+
+    if ((!body || body === '') && hasAttachments) {
+        return 'Изображение';
+    }
+
+    if (!body) {
+        return '';
+    }
+
+    return body.length > 80 ? `${body.slice(0, 80)}…` : body;
+}

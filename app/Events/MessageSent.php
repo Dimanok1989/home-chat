@@ -38,7 +38,7 @@ class MessageSent implements ShouldBroadcastNow
      */
     public function broadcastWith(): array
     {
-        $this->message->loadMissing(['attachments', 'user']);
+        $this->message->loadMissing(['attachments', 'user', 'replyTo.user', 'replyTo.attachments']);
 
         return [
             'id' => $this->message->id,
@@ -48,6 +48,7 @@ class MessageSent implements ShouldBroadcastNow
             'body' => $this->message->body,
             'created_at' => $this->message->created_at?->toIso8601String(),
             'is_system' => $this->message->user?->name === null,
+            'reply_to' => $this->message->replyToPayload(),
             'attachments' => $this->message->attachments->map(
                 fn (MessageAttachment $attachment) => [
                     'id' => $attachment->id,

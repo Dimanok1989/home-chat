@@ -47,7 +47,7 @@ class MessageController extends Controller
 
         $messages = Message::query()
             ->whereIn('id', $pageIds)
-            ->with(['attachments', 'user'])
+            ->with(['attachments', 'user', 'replyTo.user', 'replyTo.attachments'])
             ->orderBy('id')
             ->get()
             ->map(fn (Message $message) => $this->formatMessage($message, $currentUserId));
@@ -64,6 +64,7 @@ class MessageController extends Controller
             'room_id' => ['required', 'integer', 'exists:chat_rooms,id'],
             'body' => ['nullable', 'string', 'max:1000'],
             'image' => ['nullable', 'image', 'max:5120'],
+            'reply_to_id' => ['nullable', 'integer', 'exists:messages,id'],
         ]);
 
         /** @var User $user */
@@ -83,12 +84,27 @@ class MessageController extends Controller
             ]);
         }
 
+        $replyToId = isset($validated['reply_to_id']) ? (int) $validated['reply_to_id'] : null;
+
+        if ($replyToId !== null) {
+            $replyTo = Message::query()->find($replyToId);
+
+            if ($replyTo === null
+                || $replyTo->chat_room_id !== $room->id
+                || $replyTo->user_id === null) {
+                throw ValidationException::withMessages([
+                    'reply_to_id' => ['Нельзя ответить на это сообщение.'],
+                ]);
+            }
+        }
+
         $currentUserId = $user->id;
 
-        $message = DB::transaction(function () use ($body, $hasImage, $request, $currentUserId, $room) {
+        $message = DB::transaction(function () use ($body, $hasImage, $request, $currentUserId, $room, $replyToId) {
             $message = Message::query()->create([
                 'user_id' => $currentUserId,
                 'chat_room_id' => $room->id,
+                'reply_to_id' => $replyToId,
                 'body' => $body !== '' ? $body : null,
             ]);
 
@@ -114,7 +130,7 @@ class MessageController extends Controller
 
             $room->update(['last_message_at' => $message->created_at]);
 
-            return $message->load(['attachments', 'user']);
+            return $message->load(['attachments', 'user', 'replyTo.user', 'replyTo.attachments']);
         });
 
         broadcast(new MessageSent($message));
@@ -198,6 +214,7 @@ class MessageController extends Controller
             'created_at' => $message->created_at?->toIso8601String(),
             'is_mine' => $currentUserId !== null && $message->user_id === $currentUserId,
             'is_system' => $userName === null,
+            'reply_to' => $message->replyToPayload(),
             'attachments' => $message->attachments->map(
                 fn (MessageAttachment $attachment) => $this->formatAttachment($attachment),
             )->values()->all(),

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, nextTick, onMounted } from 'vue';
+import ChatReplyPreviewBar from './ChatReplyPreviewBar.vue';
 
 const props = defineProps({
     modelValue: {
@@ -18,9 +19,13 @@ const props = defineProps({
         type: Boolean,
         default: false,
     },
+    replyingTo: {
+        type: Object,
+        default: null,
+    },
 });
 
-const emit = defineEmits(['update:modelValue', 'send', 'fileSelect']);
+const emit = defineEmits(['update:modelValue', 'send', 'fileSelect', 'cancelReply']);
 
 const fileInputRef = ref(null);
 const textareaRef = ref(null);
@@ -66,9 +71,14 @@ watch(
 
 onMounted(adjustTextareaHeight);
 
+function focusInput() {
+    textareaRef.value?.focus();
+}
+
 defineExpose({
     fileInputRef,
     textareaRef,
+    focusInput,
 });
 </script>
 
@@ -78,6 +88,12 @@ defineExpose({
         :class="pinned ? 'pb-[max(0.25rem,env(safe-area-inset-bottom))]' : 'pb-1'"
     >
         <p v-if="error" class="mb-2 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+
+        <ChatReplyPreviewBar
+            v-if="replyingTo"
+            :message="replyingTo"
+            @cancel="emit('cancelReply')"
+        />
 
         <form @submit.prevent="emit('send')">
             <input
