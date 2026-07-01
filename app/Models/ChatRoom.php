@@ -39,7 +39,7 @@ class ChatRoom extends Model
     public function users(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'chat_room_user')
-            ->withPivot('cleared_at')
+            ->withPivot(['cleared_at', 'last_read_message_id'])
             ->withTimestamps();
     }
 
@@ -91,6 +91,98 @@ class ChatRoom extends Model
         }
 
         return \Illuminate\Support\Carbon::parse($pivot->cleared_at);
+    }
+
+    public function ensureMembership(int $userId): void
+    {
+        if ($this->type === self::TYPE_GLOBAL) {
+            $this->users()->syncWithoutDetaching([$userId]);
+        }
+    }
+
+    public function lastReadMessageIdFor(int $userId): ?int
+    {
+        $this->ensureMembership($userId);
+
+        $pivot = $this->users()->where('users.id', $userId)->first()?->pivot;
+
+        if ($pivot?->last_read_message_id === null) {
+            return null;
+        }
+
+        return (int) $pivot->last_read_message_id;
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Builder<Message>
+     */
+    public function unreadMessagesQuery(int $userId): \Illuminate\Database\Eloquent\Builder
+    {
+        $clearedAt = $this->clearedAtForUser($userId);
+        $lastReadId = $this->lastReadMessageIdFor($userId) ?? 0;
+
+        $query = Message::query()
+            ->where('chat_room_id', $this->id)
+            ->where('id', '>', $lastReadId)
+            ->where('user_id', '!=', $userId);
+
+        if ($clearedAt !== null) {
+            $query->where('created_at', '>', $clearedAt);
+        }
+
+        return $query;
+    }
+
+    public function unreadCountFor(int $userId): int
+    {
+        return $this->unreadMessagesQuery($userId)->count();
+    }
+
+    public function firstUnreadMessageIdFor(int $userId): ?int
+    {
+        $id = $this->unreadMessagesQuery($userId)
+            ->orderBy('id')
+            ->value('id');
+
+        return $id !== null ? (int) $id : null;
+    }
+
+    public function markReadUpTo(int $userId, int $messageId): void
+    {
+        if ($this->type === self::TYPE_GLOBAL) {
+            $this->users()->syncWithoutDetaching([$userId]);
+        }
+
+        $message = Message::query()
+            ->where('id', $messageId)
+            ->where('chat_room_id', $this->id)
+            ->first();
+
+        if ($message === null) {
+            return;
+        }
+
+        $currentLastRead = $this->lastReadMessageIdFor($userId) ?? 0;
+
+        if ($messageId <= $currentLastRead) {
+            return;
+        }
+
+        $this->users()->updateExistingPivot($userId, [
+            'last_read_message_id' => $messageId,
+        ]);
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function memberUserIds(): array
+    {
+        if ($this->type === self::TYPE_GLOBAL) {
+            return User::query()->pluck('id')->all();
+        }
+
+        return $this->users()->pluck('users.id')->all();
     }
 
     /**
@@ -210,6 +302,8 @@ class ChatRoom extends Model
             $peer = $other?->toPeerPayload();
         }
 
+        $this->ensureMembership($user->id);
+
         return [
             'id' => $this->id,
             'type' => $this->type,
@@ -218,6 +312,8 @@ class ChatRoom extends Model
             'last_message' => $lastMessage ? Message::previewPayload($lastMessage) : null,
             'last_message_at' => $this->last_message_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
+            'unread_count' => $this->unreadCountFor($user->id),
+            'last_read_message_id' => $this->lastReadMessageIdFor($user->id),
         ];
     }
 }

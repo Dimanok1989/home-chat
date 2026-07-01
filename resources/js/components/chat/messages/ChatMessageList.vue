@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import ChatDateSeparator from './ChatDateSeparator.vue';
 import ChatMessage from './ChatMessage.vue';
 import ChatSpinner from '../shared/ChatSpinner.vue';
+import ChatUnreadSeparator from './ChatUnreadSeparator.vue';
 import { shouldShowDateSeparator } from '../../../utils/chatFormat';
 
 const props = defineProps({
@@ -19,6 +20,10 @@ const props = defineProps({
         default: false,
     },
     highlightedMessageId: {
+        type: Number,
+        default: null,
+    },
+    firstUnreadMessageId: {
         type: Number,
         default: null,
     },
@@ -62,6 +67,10 @@ defineExpose({
                 @open-viewer="emit('openViewer', $event)"
                 @show-context-menu="(event, payload) => emit('showContextMenu', event, payload)"
                 @scroll-to-message="emit('scrollToMessage', $event)"
+            />
+
+            <ChatUnreadSeparator
+                v-if="firstUnreadMessageId && message.id === firstUnreadMessageId"
             />
 
             <ChatDateSeparator

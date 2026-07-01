@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ChatRoom;
 use App\Models\User;
 use App\Support\BroadcastsChatRoomCreated;
+use App\Support\BroadcastsUnreadCount;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -13,6 +14,7 @@ use Illuminate\Validation\ValidationException;
 class ChatRoomController extends Controller
 {
     use BroadcastsChatRoomCreated;
+    use BroadcastsUnreadCount;
 
     public function index(Request $request): JsonResponse
     {
@@ -132,10 +134,50 @@ class ChatRoomController extends Controller
 
         $room->users()->updateExistingPivot($user->id, [
             'cleared_at' => now(),
+            'last_read_message_id' => null,
         ]);
 
         return response()->json([
             'id' => $room->id,
+        ]);
+    }
+
+    public function markRead(Request $request, ChatRoom $room): JsonResponse
+    {
+        /** @var User $user */
+        $user = Auth::user();
+
+        if (! $room->isAccessibleBy($user)) {
+            abort(403);
+        }
+
+        $validated = $request->validate([
+            'last_read_message_id' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $messageId = (int) $validated['last_read_message_id'];
+
+        $message = \App\Models\Message::query()
+            ->where('id', $messageId)
+            ->where('chat_room_id', $room->id)
+            ->first();
+
+        if ($message === null) {
+            throw ValidationException::withMessages([
+                'last_read_message_id' => ['Сообщение не найдено в этом чате.'],
+            ]);
+        }
+
+        $room->markReadUpTo($user->id, $messageId);
+
+        $unreadCount = $room->unreadCountFor($user->id);
+
+        $this->broadcastUnreadCountForUser($room, $user);
+
+        return response()->json([
+            'chat_room_id' => $room->id,
+            'last_read_message_id' => $messageId,
+            'unread_count' => $unreadCount,
         ]);
     }
 }

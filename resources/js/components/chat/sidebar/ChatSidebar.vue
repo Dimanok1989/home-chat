@@ -49,6 +49,14 @@ const editProfileError = ref('');
 
 const showSearchResults = computed(() => searchQuery.value.trim().length > 0 && sidebarView.value === 'chats');
 
+function formatUnreadCount(count) {
+    if (count > 99) {
+        return '99+';
+    }
+
+    return String(count);
+}
+
 function formatRoomPreview(room) {
     const lastMessage = room.last_message;
 
@@ -398,6 +406,13 @@ onUnmounted(() => {
                                     >
                                         {{ formatRoomPreview(room) }}
                                     </span>
+                                </span>
+                                <span
+                                    v-if="room.unread_count > 0 && room.id !== activeRoomId"
+                                    class="flex h-5 min-w-5 shrink-0 self-center items-center justify-center rounded-full bg-blue-500 px-1.5 text-xs font-semibold text-white"
+                                    :aria-label="`${room.unread_count} непрочитанных`"
+                                >
+                                    {{ formatUnreadCount(room.unread_count) }}
                                 </span>
                             </button>
                         </li>

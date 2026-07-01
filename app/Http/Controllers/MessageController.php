@@ -6,6 +6,7 @@ use App\Events\MessageDeleted;
 use App\Events\MessageSent;
 use App\Models\ChatRoom;
 use App\Support\BroadcastsChatRoomCreated;
+use App\Support\BroadcastsUnreadCount;
 use App\Models\Message;
 use App\Models\MessageAttachment;
 use App\Models\User;
@@ -19,17 +20,24 @@ use Illuminate\Validation\ValidationException;
 class MessageController extends Controller
 {
     use BroadcastsChatRoomCreated;
+    use BroadcastsUnreadCount;
 
     public function index(Request $request): JsonResponse
     {
         /** @var User $user */
         $user = Auth::user();
         $room = $this->resolveAccessibleRoom($request);
+        $room->ensureMembership($user->id);
         $clearedAt = $room->clearedAtForUser($user->id);
 
         $currentUserId = $user->id;
         $limit = min(max((int) $request->query('limit', 40), 1), 100);
         $beforeId = $request->query('before_id');
+        $context = $request->query('context');
+
+        if ($context === 'unread') {
+            return $this->indexWithUnreadContext($room, $user, $clearedAt, $limit);
+        }
 
         $query = Message::query()
             ->where('chat_room_id', $room->id);
@@ -63,6 +71,62 @@ class MessageController extends Controller
         return response()->json([
             'messages' => $messages,
             'has_more' => $hasMore,
+            'last_read_message_id' => $room->lastReadMessageIdFor($user->id),
+            'first_unread_message_id' => $room->firstUnreadMessageIdFor($user->id),
+            'unread_count' => $room->unreadCountFor($user->id),
+        ]);
+    }
+
+    /**
+     * @return JsonResponse
+     */
+    private function indexWithUnreadContext(
+        ChatRoom $room,
+        User $user,
+        ?\Illuminate\Support\Carbon $clearedAt,
+        int $contextLimit,
+    ): JsonResponse {
+        $currentUserId = $user->id;
+        $lastReadId = $room->lastReadMessageIdFor($user->id) ?? 0;
+
+        $baseQuery = Message::query()->where('chat_room_id', $room->id);
+
+        if ($clearedAt !== null) {
+            $baseQuery->where('created_at', '>', $clearedAt);
+        }
+
+        $unreadIds = (clone $baseQuery)
+            ->where('id', '>', $lastReadId)
+            ->orderBy('id')
+            ->pluck('id');
+
+        $readContextIds = (clone $baseQuery)
+            ->where('id', '<=', $lastReadId)
+            ->orderByDesc('id')
+            ->limit($contextLimit + 1)
+            ->pluck('id');
+
+        $hasMore = $readContextIds->count() > $contextLimit;
+
+        if ($hasMore) {
+            $readContextIds = $readContextIds->take($contextLimit);
+        }
+
+        $allIds = $readContextIds->merge($unreadIds)->unique()->sort()->values();
+
+        $messages = Message::query()
+            ->whereIn('id', $allIds)
+            ->with(['attachments', 'user', 'replyTo.user', 'replyTo.attachments'])
+            ->orderBy('id')
+            ->get()
+            ->map(fn (Message $message) => $this->formatMessage($message, $currentUserId));
+
+        return response()->json([
+            'messages' => $messages,
+            'has_more' => $hasMore,
+            'last_read_message_id' => $lastReadId > 0 ? $lastReadId : null,
+            'first_unread_message_id' => $room->firstUnreadMessageIdFor($user->id),
+            'unread_count' => $room->unreadCountFor($user->id),
         ]);
     }
 
@@ -165,6 +229,9 @@ class MessageController extends Controller
         });
 
         broadcast(new MessageSent($message));
+
+        $room->markReadUpTo($currentUserId, $message->id);
+        $this->broadcastUnreadCountsForRoom($room->fresh(['users']));
 
         if ($wasFirstMessage) {
             $this->broadcastChatRoomCreated($room, $currentUserId);

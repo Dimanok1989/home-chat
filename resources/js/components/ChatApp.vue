@@ -45,7 +45,11 @@ const contextMenu = ref(null);
 const roomContextMenu = ref(null);
 const replyingTo = ref(null);
 const highlightedMessageId = ref(null);
+const lastReadMessageId = ref(null);
+const firstUnreadMessageId = ref(null);
 let highlightTimeout = null;
+let markReadTimer = null;
+let readObserver = null;
 const deleteConfirm = ref({
     show: false,
     messageId: null,
@@ -240,6 +244,14 @@ function sortRooms() {
     });
 }
 
+function updateRoomUnread(roomId, count) {
+    const room = rooms.value.find((item) => item.id === roomId);
+
+    if (room) {
+        room.unread_count = count;
+    }
+}
+
 function upsertRoom(room) {
     const index = rooms.value.findIndex((item) => item.id === room.id);
     const isNew = index === -1;
@@ -312,9 +324,15 @@ function appendMessage(message) {
 
     messages.value.push(mapMessage(message));
     updateRoomPreview(message);
+
+    const roomId = Number(message.chat_room_id);
+
+    if (roomId === activeRoomId.value) {
+        nextTick(() => setupReadObserver());
+    }
 }
 
-async function fetchMessages(beforeId = null, roomId = activeRoomId.value) {
+async function fetchMessages(beforeId = null, roomId = activeRoomId.value, { context = null } = {}) {
     const params = new URLSearchParams({
         limit: String(MESSAGES_PAGE_SIZE),
         room_id: String(roomId),
@@ -322,6 +340,10 @@ async function fetchMessages(beforeId = null, roomId = activeRoomId.value) {
 
     if (beforeId !== null) {
         params.set('before_id', String(beforeId));
+    }
+
+    if (context) {
+        params.set('context', context);
     }
 
     const response = await fetch(`/api/messages?${params}`, {
@@ -340,14 +362,165 @@ async function fetchMessages(beforeId = null, roomId = activeRoomId.value) {
 
 async function loadMessages(roomId = activeRoomId.value) {
     try {
-        const data = await fetchMessages(null, roomId);
+        const data = await fetchMessages(null, roomId, { context: 'unread' });
         messages.value = data.messages.map(mapMessage);
         hasMoreOlder.value = data.has_more;
+        lastReadMessageId.value = data.last_read_message_id ?? null;
+        firstUnreadMessageId.value = data.first_unread_message_id ?? null;
+        updateRoomUnread(roomId, 0);
     } catch (err) {
         notifyError(err.message, 'Не удалось загрузить сообщения');
     } finally {
         await nextTick();
         initialLoadDone.value = true;
+        scrollToReadPosition();
+        setupReadObserver();
+    }
+}
+
+function scrollToReadPosition() {
+    const container = getMessagesContainer();
+
+    if (!container) {
+        return;
+    }
+
+    if (firstUnreadMessageId.value && lastReadMessageId.value) {
+        const lastReadElement = container.querySelector(`[data-message-id="${lastReadMessageId.value}"]`);
+
+        if (lastReadElement) {
+            lastReadElement.scrollIntoView({ block: 'start' });
+            return;
+        }
+    }
+
+    if (firstUnreadMessageId.value) {
+        const separator = container.querySelector('[data-unread-separator]');
+
+        if (separator) {
+            separator.scrollIntoView({ block: 'start' });
+            return;
+        }
+    }
+
+    container.scrollTop = 0;
+}
+
+function scheduleMarkRead(messageId) {
+    clearTimeout(markReadTimer);
+
+    markReadTimer = setTimeout(() => {
+        void markReadUpTo(messageId);
+    }, 300);
+}
+
+async function markReadUpTo(messageId) {
+    if (!activeRoomId.value || !messageId) {
+        return;
+    }
+
+    const id = Number(messageId);
+    const currentLastRead = lastReadMessageId.value ?? 0;
+
+    if (id <= currentLastRead) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/chat-rooms/${activeRoomId.value}/read`, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ last_read_message_id: id }),
+        });
+
+        if (!response.ok) {
+            return;
+        }
+
+        const data = await response.json();
+        lastReadMessageId.value = data.last_read_message_id ?? id;
+
+        if ((data.unread_count ?? 0) === 0) {
+            firstUnreadMessageId.value = null;
+        }
+
+        updateRoomUnread(activeRoomId.value, data.unread_count ?? 0);
+        await nextTick();
+        setupReadObserver();
+    } catch {
+        // ignore transient read-mark failures
+    }
+}
+
+function teardownReadObserver() {
+    if (readObserver) {
+        readObserver.disconnect();
+        readObserver = null;
+    }
+
+    clearTimeout(markReadTimer);
+}
+
+function setupReadObserver() {
+    teardownReadObserver();
+
+    const container = getMessagesContainer();
+
+    if (!container || !activeRoomId.value) {
+        return;
+    }
+
+    const lastRead = lastReadMessageId.value ?? 0;
+
+    readObserver = new IntersectionObserver((entries) => {
+        let maxVisibleId = null;
+        const currentLastRead = lastReadMessageId.value ?? 0;
+
+        for (const entry of entries) {
+            if (!entry.isIntersecting) {
+                continue;
+            }
+
+            const id = Number(entry.target.dataset.messageId);
+
+            if (!id || id <= currentLastRead) {
+                continue;
+            }
+
+            const message = messages.value.find((item) => item.id === id);
+
+            if (!message || message.is_mine) {
+                continue;
+            }
+
+            if (maxVisibleId === null || id > maxVisibleId) {
+                maxVisibleId = id;
+            }
+        }
+
+        if (maxVisibleId !== null) {
+            scheduleMarkRead(maxVisibleId);
+        }
+    }, {
+        root: container,
+        threshold: 0.5,
+    });
+
+    for (const message of messages.value) {
+        if (message.is_mine || message.id <= lastRead) {
+            continue;
+        }
+
+        const element = container.querySelector(`[data-message-id="${message.id}"]`);
+
+        if (element) {
+            readObserver.observe(element);
+        }
     }
 }
 
@@ -399,6 +572,22 @@ function removeRoomPresenceUser(roomId, user) {
 
     const current = roomPresenceUsers.value[roomId] ?? [];
     setRoomPresence(roomId, current.filter((item) => item.id !== user.id));
+}
+
+function handleUnreadCountUpdated(payload) {
+    const roomId = Number(payload.chat_room_id);
+    const count = Number(payload.unread_count ?? 0);
+
+    if (!roomId) {
+        return;
+    }
+
+    if (roomId === activeRoomId.value) {
+        updateRoomUnread(roomId, 0);
+        return;
+    }
+
+    updateRoomUnread(roomId, count);
 }
 
 function handleMessageSent(payload) {
@@ -491,6 +680,7 @@ function subscribeUserChannel() {
                 upsertRoom(payload.room);
             }
         })
+        .listen('.UnreadCountUpdated', handleUnreadCountUpdated)
         .error((err) => {
             console.error('Echo user channel error', err);
         });
@@ -546,11 +736,14 @@ function leaveAllRoomChannels() {
 }
 
 function closeActiveRoom() {
+    teardownReadObserver();
     activeRoomId.value = null;
     pendingDirectUser.value = null;
     messages.value = [];
     hasMoreOlder.value = true;
     initialLoadDone.value = true;
+    lastReadMessageId.value = null;
+    firstUnreadMessageId.value = null;
     error.value = '';
     mobileChatOpen.value = false;
     clearReply();
@@ -565,10 +758,13 @@ async function openRoom(roomId, { updateUrl = false, replaceUrl = false } = {}) 
     const isSameRoom = roomId === activeRoomId.value;
 
     if (!isSameRoom) {
+        teardownReadObserver();
         activeRoomId.value = roomId;
         messages.value = [];
         hasMoreOlder.value = true;
         initialLoadDone.value = false;
+        lastReadMessageId.value = null;
+        firstUnreadMessageId.value = null;
         error.value = '';
         clearReply();
 
@@ -792,6 +988,7 @@ async function loadOlderMessages() {
             await nextTick();
 
             container.scrollTop = container.scrollHeight - distanceFromBottom;
+            setupReadObserver();
         }
 
         hasMoreOlder.value = data.has_more;
@@ -1399,6 +1596,7 @@ onUnmounted(() => {
         clearTimeout(highlightTimeout);
     }
 
+    teardownReadObserver();
     closeSendModal();
     leaveUserChannel();
     leaveAllRoomChannels();
@@ -1493,6 +1691,7 @@ onUnmounted(() => {
                         :loading-older="loadingOlder"
                         :loading="!initialLoadDone"
                         :highlighted-message-id="highlightedMessageId"
+                        :first-unread-message-id="firstUnreadMessageId"
                         @scroll="handleMessagesScroll"
                         @open-viewer="openViewer"
                         @show-context-menu="showContextMenu"
