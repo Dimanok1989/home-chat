@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useMediaQuery } from '../composables/useMediaQuery';
 import ChatConfirmModal from './chat/ChatConfirmModal.vue';
 import ChatCreateGroupModal from './chat/ChatCreateGroupModal.vue';
 import ChatDragOverlay from './chat/ChatDragOverlay.vue';
@@ -46,6 +47,8 @@ const isDragging = ref(false);
 const showCreateGroupModal = ref(false);
 const creatingGroup = ref(false);
 const groupError = ref('');
+const isMobile = useMediaQuery('(max-width: 767px)');
+const mobileChatOpen = ref(false);
 
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
 
@@ -281,7 +284,7 @@ async function loadRooms() {
     rooms.value = data.rooms ?? [];
     sortRooms();
 
-    if (!activeRoomId.value) {
+    if (!activeRoomId.value && !isMobile.value) {
         const globalRoom = rooms.value.find((room) => room.type === 'global');
         activeRoomId.value = globalRoom?.id ?? rooms.value[0]?.id ?? null;
     }
@@ -379,18 +382,52 @@ function leaveAllRoomChannels() {
     roomPresenceUsers.value = {};
 }
 
-async function selectRoom(roomId) {
-    if (!roomId || roomId === activeRoomId.value) {
+function openMobileChat() {
+    mobileChatOpen.value = true;
+
+    if (!history.state?.mobileChat) {
+        history.pushState({ mobileChat: true }, '');
+    }
+}
+
+function goBackToMenu() {
+    if (isMobile.value && mobileChatOpen.value) {
+        history.back();
+    }
+}
+
+function handlePopState() {
+    if (!isMobile.value) {
         return;
     }
 
-    activeRoomId.value = roomId;
-    messages.value = [];
-    hasMoreOlder.value = true;
-    initialLoadDone.value = false;
-    error.value = '';
+    mobileChatOpen.value = history.state?.mobileChat === true;
+}
 
-    await loadMessages(roomId);
+async function selectRoom(roomId) {
+    if (!roomId) {
+        return;
+    }
+
+    const isSameRoom = roomId === activeRoomId.value;
+
+    if (isSameRoom && (!isMobile.value || mobileChatOpen.value)) {
+        return;
+    }
+
+    if (!isSameRoom) {
+        activeRoomId.value = roomId;
+        messages.value = [];
+        hasMoreOlder.value = true;
+        initialLoadDone.value = false;
+        error.value = '';
+
+        await loadMessages(roomId);
+    }
+
+    if (isMobile.value) {
+        openMobileChat();
+    }
 }
 
 async function startDirect(userId) {
@@ -879,19 +916,35 @@ watch(viewerOpen, (open) => {
     document.body.style.overflow = open ? 'hidden' : '';
 });
 
+watch(isMobile, (mobile) => {
+    if (mobile) {
+        history.replaceState({ mobileChat: false }, '');
+        mobileChatOpen.value = false;
+    }
+});
+
 onMounted(async () => {
     document.addEventListener('click', hideContextMenu);
     document.addEventListener('keydown', handleViewerKeydown);
     document.addEventListener('paste', handlePaste);
+    window.addEventListener('popstate', handlePopState);
+
+    if (isMobile.value) {
+        history.replaceState({ mobileChat: false }, '');
+        mobileChatOpen.value = false;
+    }
 
     try {
         await loadRooms();
 
-        if (!activeRoomId.value) {
-            throw new Error('Не найдена доступная чат-комната');
+        if (!isMobile.value) {
+            if (!activeRoomId.value) {
+                throw new Error('Не найдена доступная чат-комната');
+            }
+
+            await loadMessages(activeRoomId.value);
         }
 
-        await loadMessages(activeRoomId.value);
         syncRoomPresenceSubscriptions();
     } catch (err) {
         error.value = err.message ?? 'Ошибка инициализации чата';
@@ -904,6 +957,7 @@ onUnmounted(() => {
     document.removeEventListener('click', hideContextMenu);
     document.removeEventListener('keydown', handleViewerKeydown);
     document.removeEventListener('paste', handlePaste);
+    window.removeEventListener('popstate', handlePopState);
     document.body.style.overflow = '';
     closeSendModal();
     leaveAllRoomChannels();
@@ -920,9 +974,11 @@ onUnmounted(() => {
 
     <div
         v-else
-        class="flex h-screen bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 text-gray-900 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800 dark:text-gray-100"
+        class="flex h-screen bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 text-gray-900 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800 dark:text-gray-100 md:bg-gradient-to-br"
     >
         <ChatSidebar
+            v-show="!isMobile || !mobileChatOpen"
+            class="min-h-0 min-w-0 flex-1 md:flex-none"
             :rooms="rooms"
             :active-room-id="activeRoomId"
             :room-online="roomOnline"
@@ -932,15 +988,39 @@ onUnmounted(() => {
         />
 
         <main
-            class="relative flex min-w-0 flex-1 flex-col"
+            v-show="!isMobile || mobileChatOpen"
+            class="relative flex min-h-0 min-w-0 flex-1 flex-col"
             @dragover="handleDragOver"
             @dragleave="handleDragLeave"
             @drop="handleDrop"
         >
             <ChatDragOverlay :visible="isDragging" />
 
-            <header class="mx-auto flex w-full max-w-250 shrink-0 items-center justify-between rounded-b-lg border-b border-l border-r border-gray-100 bg-white px-6 py-4 dark:border-gray-800 dark:bg-gray-900">
-                <h1 class="text-lg font-semibold">{{ activeRoom?.title ?? 'Чат' }}</h1>
+            <header class="mx-auto flex w-full max-w-250 shrink-0 items-center justify-between border-b border-gray-100 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-900 md:rounded-b-lg md:border-l md:border-r md:px-6">
+                <div class="flex min-w-0 items-center gap-2">
+                    <button
+                        v-if="isMobile && mobileChatOpen"
+                        type="button"
+                        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-gray-600 transition hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                        aria-label="Назад к списку чатов"
+                        @click="goBackToMenu"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-5 w-5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="M19 12H5" />
+                            <path d="M12 19l-7-7 7-7" />
+                        </svg>
+                    </button>
+                    <h1 class="truncate text-lg font-semibold">{{ activeRoom?.title ?? 'Чат' }}</h1>
+                </div>
                 <ChatThemeToggle />
             </header>
 

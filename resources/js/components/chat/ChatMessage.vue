@@ -79,7 +79,7 @@ function handleMessageContextMenu(event) {
             class="max-w-[75%] rounded-2xl px-4 py-2"
             :class="[
                 message.is_mine
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-blue-200 text-gray-900 dark:bg-blue-900 dark:text-gray-100'
                     : 'border border-gray-100 bg-white text-gray-900 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-100',
                 messageCanDelete(message) ? 'cursor-context-menu' : '',
             ]"
@@ -113,7 +113,7 @@ function handleMessageContextMenu(event) {
 
             <p
                 class="mt-1 text-right text-xs"
-                :class="message.is_mine ? 'text-blue-100' : 'text-gray-400 dark:text-gray-500'"
+                :class="message.is_mine ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'"
             >
                 {{ formatTime(message.created_at) }}
             </p>

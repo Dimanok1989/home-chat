@@ -69,7 +69,7 @@ defineExpose({
 </script>
 
 <template>
-    <div class="m-0 px-0.5 pt-1 py-3">
+    <div class="m-0 px-1 md:px-0.5 pt-1 pb-1 md:py-3">
         <p v-if="error" class="mb-2 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
         <form @submit.prevent="emit('send')">
