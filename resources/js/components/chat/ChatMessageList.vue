@@ -1,7 +1,8 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import ChatDateSeparator from './ChatDateSeparator.vue';
 import ChatMessage from './ChatMessage.vue';
+import ChatSpinner from './ChatSpinner.vue';
 import { shouldShowDateSeparator } from '../../utils/chatFormat';
 
 const props = defineProps({
@@ -13,53 +14,62 @@ const props = defineProps({
         type: Boolean,
         default: false,
     },
+    loading: {
+        type: Boolean,
+        default: false,
+    },
 });
 
 const emit = defineEmits(['scroll', 'openViewer', 'showContextMenu']);
 
 const messagesContainer = ref(null);
-const messagesEndRef = ref(null);
+
+const displayMessages = computed(() => [...props.messages].reverse());
+
+function originalIndex(displayIndex) {
+    return props.messages.length - 1 - displayIndex;
+}
 
 defineExpose({
     messagesContainer,
-    messagesEndRef,
 });
 </script>
 
 <template>
     <div
         ref="messagesContainer"
-        class="messages-scroll flex-1 space-y-3 overflow-y-auto px-6 py-4"
+        class="messages-scroll flex flex-1 flex-col-reverse gap-3 overflow-y-auto px-6 py-4"
         @scroll="emit('scroll')"
     >
-        <div
-            v-if="loadingOlder"
-            class="py-2 text-center text-xs text-gray-400 dark:text-gray-500"
+        <p
+            v-if="props.messages.length === 0 && !props.loading"
+            class="text-center text-sm text-gray-500 dark:text-gray-400"
         >
-            Загрузка...
-        </div>
+            Сообщений пока нет. Напишите первым!
+        </p>
 
         <template
-            v-for="(message, index) in props.messages"
+            v-for="(message, displayIndex) in displayMessages"
             :key="message.id"
         >
-            <ChatDateSeparator
-                v-if="shouldShowDateSeparator(props.messages, index)"
-                :date="message.created_at"
-            />
-
             <ChatMessage
                 :message="message"
                 @open-viewer="emit('openViewer', $event)"
                 @show-context-menu="(event, payload) => emit('showContextMenu', event, payload)"
             />
+
+            <ChatDateSeparator
+                v-if="shouldShowDateSeparator(props.messages, originalIndex(displayIndex))"
+                :date="message.created_at"
+            />
         </template>
 
-        <p v-if="props.messages.length === 0" class="text-center text-sm text-gray-500 dark:text-gray-400">
-            Сообщений пока нет. Напишите первым!
-        </p>
-
-        <div ref="messagesEndRef" aria-hidden="true" class="h-px shrink-0" />
+        <div
+            v-if="loadingOlder"
+            class="flex justify-center py-2"
+        >
+            <ChatSpinner size="sm" />
+        </div>
     </div>
 </template>
 

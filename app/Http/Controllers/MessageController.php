@@ -28,27 +28,28 @@ class MessageController extends Controller
         $beforeId = $request->query('before_id');
 
         $query = Message::query()
-            ->where('chat_room_id', $room->id)
-            ->with(['attachments', 'user'])
-            ->orderByDesc('id');
+            ->where('chat_room_id', $room->id);
 
         if ($beforeId !== null && $beforeId !== '') {
             $query->where('id', '<', (int) $beforeId);
         }
 
-        $messages = $query
+        $pageIds = (clone $query)
+            ->orderByDesc('id')
             ->limit($limit + 1)
-            ->get();
+            ->pluck('id');
 
-        $hasMore = $messages->count() > $limit;
+        $hasMore = $pageIds->count() > $limit;
 
         if ($hasMore) {
-            $messages = $messages->take($limit);
+            $pageIds = $pageIds->take($limit);
         }
 
-        $messages = $messages
-            ->reverse()
-            ->values()
+        $messages = Message::query()
+            ->whereIn('id', $pageIds)
+            ->with(['attachments', 'user'])
+            ->orderBy('id')
+            ->get()
             ->map(fn (Message $message) => $this->formatMessage($message, $currentUserId));
 
         return response()->json([

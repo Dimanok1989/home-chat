@@ -9,6 +9,7 @@ import ChatMessageInput from './chat/ChatMessageInput.vue';
 import ChatMessageList from './chat/ChatMessageList.vue';
 import ChatSendImageModal from './chat/ChatSendImageModal.vue';
 import ChatSidebar from './chat/ChatSidebar.vue';
+import ChatSpinner from './chat/ChatSpinner.vue';
 import ChatThemeToggle from './chat/ChatThemeToggle.vue';
 
 const MESSAGES_PAGE_SIZE = 40;
@@ -27,6 +28,7 @@ const error = ref('');
 const loadingOlder = ref(false);
 const hasMoreOlder = ref(true);
 const initialLoadDone = ref(false);
+const appReady = ref(false);
 const messageListRef = ref(null);
 const modalText = ref('');
 const pendingImage = ref(null);
@@ -119,10 +121,6 @@ function resolveExposedRef(exposed) {
 
 function getMessagesContainer() {
     return resolveExposedRef(messageListRef.value?.messagesContainer);
-}
-
-function getMessagesEndRef() {
-    return resolveExposedRef(messageListRef.value?.messagesEndRef);
 }
 
 function buildMessagePreview(message) {
@@ -230,8 +228,6 @@ function appendMessage(message) {
 
     messages.value.push(mapMessage(message));
     updateRoomPreview(message);
-    scrollToBottom();
-    bindImageLoadScroll();
 }
 
 async function fetchMessages(beforeId = null, roomId = activeRoomId.value) {
@@ -259,12 +255,16 @@ async function fetchMessages(beforeId = null, roomId = activeRoomId.value) {
 }
 
 async function loadMessages(roomId = activeRoomId.value) {
-    const data = await fetchMessages(null, roomId);
-    messages.value = data.messages.map(mapMessage);
-    hasMoreOlder.value = data.has_more;
-    initialLoadDone.value = true;
-    scrollToBottom();
-    bindImageLoadScroll();
+    try {
+        const data = await fetchMessages(null, roomId);
+        messages.value = data.messages.map(mapMessage);
+        hasMoreOlder.value = data.has_more;
+    } catch (err) {
+        error.value = err.message ?? 'Не удалось загрузить сообщения';
+    } finally {
+        await nextTick();
+        initialLoadDone.value = true;
+    }
 }
 
 async function loadRooms() {
@@ -486,8 +486,7 @@ async function loadOlderMessages() {
 
     loadingOlder.value = true;
 
-    const previousScrollHeight = container.scrollHeight;
-    const previousScrollTop = container.scrollTop;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop;
 
     try {
         const data = await fetchMessages(messages.value[0].id);
@@ -502,7 +501,7 @@ async function loadOlderMessages() {
 
             await nextTick();
 
-            container.scrollTop = container.scrollHeight - previousScrollHeight + previousScrollTop;
+            container.scrollTop = container.scrollHeight - distanceFromBottom;
         }
 
         hasMoreOlder.value = data.has_more;
@@ -520,7 +519,9 @@ function handleMessagesScroll() {
         return;
     }
 
-    if (container.scrollTop < 120) {
+    const distanceFromTop = container.scrollHeight - container.scrollTop - container.clientHeight;
+
+    if (distanceFromTop < 120) {
         loadOlderMessages();
     }
 }
@@ -874,45 +875,6 @@ async function copyImageToClipboard(url) {
     }
 }
 
-function scrollToBottom() {
-    const scroll = () => {
-        const container = getMessagesContainer();
-
-        if (container) {
-            container.scrollTop = container.scrollHeight;
-            return;
-        }
-
-        const messagesEndEl = getMessagesEndRef();
-
-        if (messagesEndEl) {
-            messagesEndEl.scrollIntoView({ block: 'end', behavior: 'auto' });
-        }
-    };
-
-    nextTick(() => {
-        scroll();
-        requestAnimationFrame(scroll);
-    });
-}
-
-function bindImageLoadScroll() {
-    if (!initialLoadDone.value) {
-        return;
-    }
-
-    nextTick(() => {
-        const container = getMessagesContainer();
-        const images = container?.querySelectorAll('img') ?? [];
-
-        for (const img of images) {
-            if (!img.complete) {
-                img.addEventListener('load', scrollToBottom, { once: true });
-            }
-        }
-    });
-}
-
 watch(viewerOpen, (open) => {
     document.body.style.overflow = open ? 'hidden' : '';
 });
@@ -933,6 +895,8 @@ onMounted(async () => {
         syncRoomPresenceSubscriptions();
     } catch (err) {
         error.value = err.message ?? 'Ошибка инициализации чата';
+    } finally {
+        appReady.value = true;
     }
 });
 
@@ -947,7 +911,17 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="flex h-screen bg-gray-100 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
+    <div
+        v-if="!appReady"
+        class="flex h-screen items-center justify-center bg-gray-100 dark:bg-gray-950"
+    >
+        <ChatSpinner size="lg" />
+    </div>
+
+    <div
+        v-else
+        class="flex h-screen bg-gray-100 text-gray-900 dark:bg-gray-950 dark:text-gray-100"
+    >
         <ChatSidebar
             :rooms="rooms"
             :active-room-id="activeRoomId"
@@ -970,12 +944,20 @@ onUnmounted(() => {
                 <ChatThemeToggle />
             </header>
 
-            <div class="flex min-h-0 flex-1 w-full flex-col items-center">
+            <div class="relative flex min-h-0 flex-1 w-full flex-col items-center">
+                <div
+                    v-if="!initialLoadDone"
+                    class="absolute inset-0 z-10 flex items-center justify-center bg-white/70 dark:bg-gray-900/70"
+                >
+                    <ChatSpinner size="md" />
+                </div>
+
                 <div class="flex h-full w-full max-w-[800px] flex-col">
                     <ChatMessageList
                         ref="messageListRef"
                         :messages="messages"
                         :loading-older="loadingOlder"
+                        :loading="!initialLoadDone"
                         @scroll="handleMessagesScroll"
                         @open-viewer="openViewer"
                         @show-context-menu="showContextMenu"

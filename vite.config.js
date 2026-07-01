@@ -20,6 +20,9 @@ export default defineConfig({
     ],
     server: {
         watch: {
+            // Avoid ENOSPC when inotify max_user_watches is exhausted on Linux.
+            usePolling: true,
+            interval: 1000,
             ignored: ['**/storage/framework/views/**'],
         },
     },

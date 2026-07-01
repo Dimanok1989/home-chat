@@ -28,11 +28,13 @@ export function formatDate(isoString) {
         return '';
     }
 
-    return new Date(isoString).toLocaleDateString([], {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-    });
+    const date = new Date(isoString);
+    const now = new Date();
+    const options = date.getFullYear() === now.getFullYear()
+        ? { day: 'numeric', month: 'long' }
+        : { day: 'numeric', month: 'long', year: 'numeric' };
+
+    return date.toLocaleDateString([], options);
 }
 
 function calendarDayKey(isoString) {
