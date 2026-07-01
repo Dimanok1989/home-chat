@@ -298,6 +298,10 @@
         </div>
 
         <script>
+            document.addEventListener('contextmenu', (event) => {
+                event.preventDefault();
+            });
+
             (function () {
                 const modal = document.getElementById('privacy-policy-modal');
                 const openBtn = document.getElementById('privacy-policy-open');
