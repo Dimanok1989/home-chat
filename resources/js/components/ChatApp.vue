@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import ChatConfirmModal from './chat/ChatConfirmModal.vue';
+import ChatCreateGroupModal from './chat/ChatCreateGroupModal.vue';
 import ChatDragOverlay from './chat/ChatDragOverlay.vue';
 import ChatImageContextMenu from './chat/ChatImageContextMenu.vue';
 import ChatImageViewer from './chat/ChatImageViewer.vue';
@@ -13,7 +14,10 @@ import ChatThemeToggle from './chat/ChatThemeToggle.vue';
 const MESSAGES_PAGE_SIZE = 40;
 
 const messages = ref([]);
-const onlineUsers = ref([]);
+const rooms = ref([]);
+const activeRoomId = ref(null);
+const roomPresenceUsers = ref({});
+const subscribedRoomIds = new Set();
 const newMessage = ref('');
 const currentUserId = ref(
     Number(document.querySelector('meta[name="user-id"]')?.getAttribute('content') ?? 0) || null,
@@ -37,8 +41,31 @@ const deleteConfirm = ref({
     deleting: false,
 });
 const isDragging = ref(false);
+const showCreateGroupModal = ref(false);
+const creatingGroup = ref(false);
+const groupError = ref('');
 
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
+
+const activeRoom = computed(() => rooms.value.find((room) => room.id === activeRoomId.value) ?? null);
+
+const roomOnline = computed(() => {
+    const result = {};
+
+    for (const room of rooms.value) {
+        if (room.type !== 'direct') {
+            result[room.id] = false;
+            continue;
+        }
+
+        const users = roomPresenceUsers.value[room.id] ?? [];
+        result[room.id] = users.some(
+            (user) => Number(user.id) !== Number(currentUserId.value),
+        );
+    }
+
+    return result;
+});
 
 const allChatImages = computed(() => {
     const images = [];
@@ -98,6 +125,97 @@ function getMessagesEndRef() {
     return resolveExposedRef(messageListRef.value?.messagesEndRef);
 }
 
+function buildMessagePreview(message) {
+    const hasAttachments = (message.attachments ?? []).length > 0;
+    const body = message.body;
+
+    if ((!body || body === '') && hasAttachments) {
+        return 'Изображение';
+    }
+
+    if (!body) {
+        return '';
+    }
+
+    return body.length > 80 ? `${body.slice(0, 80)}…` : body;
+}
+
+function getRoomActivityTime(room) {
+    const activityAt = room.last_message_at ?? room.created_at;
+
+    return activityAt ? new Date(activityAt).getTime() : 0;
+}
+
+function sortRooms() {
+    rooms.value = [...rooms.value].sort((a, b) => {
+        const timeA = getRoomActivityTime(a);
+        const timeB = getRoomActivityTime(b);
+
+        if (timeA !== timeB) {
+            return timeB - timeA;
+        }
+
+        return b.id - a.id;
+    });
+}
+
+function upsertRoom(room) {
+    const index = rooms.value.findIndex((item) => item.id === room.id);
+    const isNew = index === -1;
+
+    if (isNew) {
+        rooms.value.push(room);
+    } else {
+        rooms.value[index] = { ...rooms.value[index], ...room };
+    }
+
+    sortRooms();
+
+    if (isNew) {
+        subscribeRoomPresence(room.id);
+    }
+}
+
+function updateRoomPreview(message) {
+    const roomId = Number(message.chat_room_id);
+
+    if (!roomId) {
+        return;
+    }
+
+    const room = rooms.value.find((item) => item.id === roomId);
+
+    if (!room) {
+        return;
+    }
+
+    room.last_message = {
+        preview: buildMessagePreview(message),
+        user_name: message.user_name ?? null,
+        created_at: message.created_at ?? null,
+    };
+    room.last_message_at = message.created_at ?? room.last_message_at;
+    sortRooms();
+}
+
+function updateRoomAfterDelete(payload) {
+    const roomId = Number(payload.chat_room_id);
+
+    if (!roomId) {
+        return;
+    }
+
+    const room = rooms.value.find((item) => item.id === roomId);
+
+    if (!room) {
+        return;
+    }
+
+    room.last_message = payload.last_message ?? null;
+    room.last_message_at = payload.last_message_at ?? room.created_at ?? null;
+    sortRooms();
+}
+
 function appendMessage(message) {
     const existingIndex = messages.value.findIndex((item) => item.id === message.id);
     const isMine = resolveIsMine(message);
@@ -111,13 +229,15 @@ function appendMessage(message) {
     }
 
     messages.value.push(mapMessage(message));
+    updateRoomPreview(message);
     scrollToBottom();
     bindImageLoadScroll();
 }
 
-async function fetchMessages(beforeId = null) {
+async function fetchMessages(beforeId = null, roomId = activeRoomId.value) {
     const params = new URLSearchParams({
         limit: String(MESSAGES_PAGE_SIZE),
+        room_id: String(roomId),
     });
 
     if (beforeId !== null) {
@@ -138,13 +258,219 @@ async function fetchMessages(beforeId = null) {
     return response.json();
 }
 
-async function loadMessages() {
-    const data = await fetchMessages();
+async function loadMessages(roomId = activeRoomId.value) {
+    const data = await fetchMessages(null, roomId);
     messages.value = data.messages.map(mapMessage);
     hasMoreOlder.value = data.has_more;
     initialLoadDone.value = true;
     scrollToBottom();
     bindImageLoadScroll();
+}
+
+async function loadRooms() {
+    const response = await fetch('/api/chat-rooms', {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+    });
+
+    if (!response.ok) {
+        throw new Error('Не удалось загрузить список чатов');
+    }
+
+    const data = await response.json();
+    rooms.value = data.rooms ?? [];
+    sortRooms();
+
+    if (!activeRoomId.value) {
+        const globalRoom = rooms.value.find((room) => room.type === 'global');
+        activeRoomId.value = globalRoom?.id ?? rooms.value[0]?.id ?? null;
+    }
+
+    syncRoomPresenceSubscriptions();
+}
+
+function setRoomPresence(roomId, users) {
+    roomPresenceUsers.value = {
+        ...roomPresenceUsers.value,
+        [roomId]: users,
+    };
+}
+
+function upsertRoomPresenceUser(roomId, user) {
+    if (!user?.id) {
+        return;
+    }
+
+    const current = roomPresenceUsers.value[roomId] ?? [];
+    const existingIndex = current.findIndex((item) => item.id === user.id);
+
+    if (existingIndex === -1) {
+        setRoomPresence(roomId, [...current, user]);
+        return;
+    }
+
+    const updated = [...current];
+    updated[existingIndex] = user;
+    setRoomPresence(roomId, updated);
+}
+
+function removeRoomPresenceUser(roomId, user) {
+    if (!user?.id) {
+        return;
+    }
+
+    const current = roomPresenceUsers.value[roomId] ?? [];
+    setRoomPresence(roomId, current.filter((item) => item.id !== user.id));
+}
+
+function handleMessageSent(payload) {
+    updateRoomPreview(payload);
+
+    if (Number(payload.chat_room_id) === activeRoomId.value) {
+        appendMessage(payload);
+    }
+}
+
+function handleMessageDeleted(payload) {
+    if (Number(payload.chat_room_id) === activeRoomId.value) {
+        removeMessage(payload.id);
+    }
+
+    updateRoomAfterDelete(payload);
+}
+
+function subscribeRoomPresence(roomId) {
+    if (!roomId || subscribedRoomIds.has(roomId)) {
+        return;
+    }
+
+    subscribedRoomIds.add(roomId);
+
+    window.Echo.join(`chat.room.${roomId}`)
+        .here((users) => {
+            setRoomPresence(roomId, users);
+        })
+        .joining((user) => {
+            upsertRoomPresenceUser(roomId, user);
+        })
+        .leaving((user) => {
+            removeRoomPresenceUser(roomId, user);
+        })
+        .listen('.MessageSent', handleMessageSent)
+        .listen('.MessageDeleted', handleMessageDeleted)
+        .error((err) => {
+            console.error('Echo presence error', err);
+            error.value = 'Ошибка подключения к чату';
+        });
+}
+
+function syncRoomPresenceSubscriptions() {
+    for (const room of rooms.value) {
+        subscribeRoomPresence(room.id);
+    }
+}
+
+function leaveAllRoomChannels() {
+    for (const roomId of subscribedRoomIds) {
+        window.Echo.leave(`chat.room.${roomId}`);
+    }
+
+    subscribedRoomIds.clear();
+    roomPresenceUsers.value = {};
+}
+
+async function selectRoom(roomId) {
+    if (!roomId || roomId === activeRoomId.value) {
+        return;
+    }
+
+    activeRoomId.value = roomId;
+    messages.value = [];
+    hasMoreOlder.value = true;
+    initialLoadDone.value = false;
+    error.value = '';
+
+    await loadMessages(roomId);
+}
+
+async function startDirect(userId) {
+    error.value = '';
+
+    try {
+        const response = await fetch('/api/chat-rooms/direct', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ user_id: userId }),
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            const validationError = data.errors
+                ? Object.values(data.errors).flat().join(' ')
+                : null;
+            throw new Error(validationError ?? data.message ?? 'Не удалось открыть диалог');
+        }
+
+        const data = await response.json();
+        upsertRoom(data.room);
+        await selectRoom(data.room.id);
+    } catch (err) {
+        error.value = err.message ?? 'Не удалось открыть диалог';
+    }
+}
+
+function openCreateGroupModal() {
+    groupError.value = '';
+    showCreateGroupModal.value = true;
+}
+
+function closeCreateGroupModal() {
+    if (creatingGroup.value) {
+        return;
+    }
+
+    showCreateGroupModal.value = false;
+    groupError.value = '';
+}
+
+async function createGroup({ name, userIds }) {
+    creatingGroup.value = true;
+    groupError.value = '';
+
+    try {
+        const response = await fetch('/api/chat-rooms/group', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ name, user_ids: userIds }),
+        });
+
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            const validationError = data.errors
+                ? Object.values(data.errors).flat().join(' ')
+                : null;
+            throw new Error(validationError ?? data.message ?? 'Не удалось создать группу');
+        }
+
+        const data = await response.json();
+        upsertRoom(data.room);
+        showCreateGroupModal.value = false;
+        await selectRoom(data.room.id);
+    } catch (err) {
+        groupError.value = err.message ?? 'Не удалось создать группу';
+    } finally {
+        creatingGroup.value = false;
+    }
 }
 
 async function loadOlderMessages() {
@@ -202,7 +528,7 @@ function handleMessagesScroll() {
 async function sendMessage() {
     const body = newMessage.value.trim();
 
-    if (!body || sending.value) {
+    if (!body || sending.value || !activeRoomId.value) {
         return;
     }
 
@@ -218,7 +544,10 @@ async function sendMessage() {
                 'X-CSRF-TOKEN': csrfToken,
             },
             credentials: 'same-origin',
-            body: JSON.stringify({ body }),
+            body: JSON.stringify({
+                body,
+                room_id: activeRoomId.value,
+            }),
         });
 
         if (!response.ok) {
@@ -262,7 +591,7 @@ function closeSendModal() {
 }
 
 async function sendMessageWithImage() {
-    if (!pendingImage.value || sending.value) {
+    if (!pendingImage.value || sending.value || !activeRoomId.value) {
         return;
     }
 
@@ -271,6 +600,7 @@ async function sendMessageWithImage() {
 
     const formData = new FormData();
     formData.append('image', pendingImage.value);
+    formData.append('room_id', String(activeRoomId.value));
 
     const body = modalText.value.trim();
 
@@ -508,7 +838,9 @@ async function confirmDeleteMessage() {
             throw new Error(data.message ?? 'Не удалось удалить сообщение');
         }
 
+        const data = await response.json();
         removeMessage(messageId);
+        updateRoomAfterDelete(data);
         deleteConfirm.value = {
             show: false,
             messageId: null,
@@ -581,25 +913,6 @@ function bindImageLoadScroll() {
     });
 }
 
-function upsertOnlineUser(user) {
-    if (!user?.id) {
-        return;
-    }
-
-    const existingIndex = onlineUsers.value.findIndex((item) => item.id === user.id);
-
-    if (existingIndex === -1) {
-        onlineUsers.value.push(user);
-        return;
-    }
-
-    onlineUsers.value[existingIndex] = user;
-}
-
-function removeOnlineUser(user) {
-    onlineUsers.value = onlineUsers.value.filter((item) => item.id !== user.id);
-}
-
 watch(viewerOpen, (open) => {
     document.body.style.overflow = open ? 'hidden' : '';
 });
@@ -610,28 +923,14 @@ onMounted(async () => {
     document.addEventListener('paste', handlePaste);
 
     try {
-        await loadMessages();
+        await loadRooms();
 
-        window.Echo.join('chat')
-            .here((users) => {
-                onlineUsers.value = users;
-            })
-            .joining((user) => {
-                upsertOnlineUser(user);
-            })
-            .leaving((user) => {
-                removeOnlineUser(user);
-            })
-            .listen('.MessageSent', (payload) => {
-                appendMessage(payload);
-            })
-            .listen('.MessageDeleted', (payload) => {
-                removeMessage(payload.id);
-            })
-            .error((err) => {
-                console.error('Echo presence error', err);
-                error.value = 'Ошибка подключения к чату';
-            });
+        if (!activeRoomId.value) {
+            throw new Error('Не найдена доступная чат-комната');
+        }
+
+        await loadMessages(activeRoomId.value);
+        syncRoomPresenceSubscriptions();
     } catch (err) {
         error.value = err.message ?? 'Ошибка инициализации чата';
     }
@@ -643,13 +942,20 @@ onUnmounted(() => {
     document.removeEventListener('paste', handlePaste);
     document.body.style.overflow = '';
     closeSendModal();
-    window.Echo.leave('chat');
+    leaveAllRoomChannels();
 });
 </script>
 
 <template>
     <div class="flex h-screen bg-gray-100 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
-        <ChatSidebar :online-users="onlineUsers" />
+        <ChatSidebar
+            :rooms="rooms"
+            :active-room-id="activeRoomId"
+            :room-online="roomOnline"
+            @select-room="selectRoom"
+            @start-direct="startDirect"
+            @open-create-group="openCreateGroupModal"
+        />
 
         <main
             class="relative flex min-w-0 flex-1 flex-col bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800"
@@ -660,12 +966,12 @@ onUnmounted(() => {
             <ChatDragOverlay :visible="isDragging" />
 
             <header class="flex w-full shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-gray-700 dark:bg-gray-900">
-                <h1 class="text-lg font-semibold">Домашний чат</h1>
+                <h1 class="text-lg font-semibold">{{ activeRoom?.title ?? 'Чат' }}</h1>
                 <ChatThemeToggle />
             </header>
 
             <div class="flex min-h-0 flex-1 w-full flex-col items-center">
-                <div class="flex h-full w-full max-w-[1000px] flex-col">
+                <div class="flex h-full w-full max-w-[800px] flex-col">
                     <ChatMessageList
                         ref="messageListRef"
                         :messages="messages"
@@ -687,6 +993,14 @@ onUnmounted(() => {
         </main>
 
         <Teleport to="body">
+            <ChatCreateGroupModal
+                :show="showCreateGroupModal"
+                :creating="creatingGroup"
+                :error="groupError"
+                @close="closeCreateGroupModal"
+                @create="createGroup"
+            />
+
             <ChatConfirmModal
                 :show="deleteConfirm.show"
                 title="Удалить сообщение"

@@ -2,7 +2,9 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ChatAttachmentController;
+use App\Http\Controllers\ChatRoomController;
 use App\Http\Controllers\MessageController;
+use App\Http\Controllers\UserSearchController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('guest')->group(function () {
@@ -16,6 +18,10 @@ Route::post('/logout', [AuthController::class, 'logout'])
 
 Route::middleware('auth')->group(function () {
     Route::view('/chat', 'chat');
+    Route::get('/api/chat-rooms', [ChatRoomController::class, 'index']);
+    Route::post('/api/chat-rooms/direct', [ChatRoomController::class, 'storeDirect']);
+    Route::post('/api/chat-rooms/group', [ChatRoomController::class, 'storeGroup']);
+    Route::get('/api/users/search', [UserSearchController::class, 'index']);
     Route::get('/api/messages', [MessageController::class, 'index']);
     Route::post('/api/messages', [MessageController::class, 'store']);
     Route::delete('/api/messages/{message}', [MessageController::class, 'destroy']);

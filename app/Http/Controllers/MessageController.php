@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Events\MessageDeleted;
 use App\Events\MessageSent;
+use App\Models\ChatRoom;
 use App\Models\Message;
 use App\Models\MessageAttachment;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -17,11 +19,16 @@ class MessageController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $currentUserId = Auth::id();
+        /** @var User $user */
+        $user = Auth::user();
+        $room = $this->resolveAccessibleRoom($request);
+
+        $currentUserId = $user->id;
         $limit = min(max((int) $request->query('limit', 40), 1), 100);
         $beforeId = $request->query('before_id');
 
         $query = Message::query()
+            ->where('chat_room_id', $room->id)
             ->with(['attachments', 'user'])
             ->orderByDesc('id');
 
@@ -53,9 +60,18 @@ class MessageController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
+            'room_id' => ['required', 'integer', 'exists:chat_rooms,id'],
             'body' => ['nullable', 'string', 'max:1000'],
             'image' => ['nullable', 'image', 'max:5120'],
         ]);
+
+        /** @var User $user */
+        $user = Auth::user();
+        $room = ChatRoom::query()->findOrFail((int) $validated['room_id']);
+
+        if (! $room->isAccessibleBy($user)) {
+            abort(403);
+        }
 
         $body = isset($validated['body']) ? trim($validated['body']) : '';
         $hasImage = $request->hasFile('image');
@@ -66,11 +82,12 @@ class MessageController extends Controller
             ]);
         }
 
-        $currentUserId = Auth::id();
+        $currentUserId = $user->id;
 
-        $message = DB::transaction(function () use ($body, $hasImage, $request, $currentUserId) {
+        $message = DB::transaction(function () use ($body, $hasImage, $request, $currentUserId, $room) {
             $message = Message::query()->create([
                 'user_id' => $currentUserId,
+                'chat_room_id' => $room->id,
                 'body' => $body !== '' ? $body : null,
             ]);
 
@@ -94,6 +111,8 @@ class MessageController extends Controller
                 ]);
             }
 
+            $room->update(['last_message_at' => $message->created_at]);
+
             return $message->load(['attachments', 'user']);
         });
 
@@ -106,20 +125,60 @@ class MessageController extends Controller
 
     public function destroy(Message $message): JsonResponse
     {
-        $currentUserId = Auth::id();
+        /** @var User $user */
+        $user = Auth::user();
 
-        if ($message->user_id !== $currentUserId) {
+        if ($message->user_id !== $user->id) {
+            abort(403);
+        }
+
+        $room = $message->chatRoom;
+
+        if ($room === null || ! $room->isAccessibleBy($user)) {
             abort(403);
         }
 
         $messageId = $message->id;
+        $roomId = $room->id;
         $message->delete();
 
-        broadcast(new MessageDeleted($messageId));
+        $lastMessage = Message::query()
+            ->where('chat_room_id', $roomId)
+            ->with(['attachments', 'user'])
+            ->latest('id')
+            ->first();
+
+        $lastMessageAt = $lastMessage?->created_at ?? $room->created_at;
+        $room->update(['last_message_at' => $lastMessageAt]);
+
+        $lastMessagePayload = $lastMessage ? Message::previewPayload($lastMessage) : null;
+        $lastMessageAtIso = $lastMessageAt->toIso8601String();
+
+        broadcast(new MessageDeleted($messageId, $roomId, $lastMessagePayload, $lastMessageAtIso));
 
         return response()->json([
             'id' => $messageId,
+            'chat_room_id' => $roomId,
+            'last_message' => $lastMessagePayload,
+            'last_message_at' => $lastMessageAtIso,
         ]);
+    }
+
+    private function resolveAccessibleRoom(Request $request): ChatRoom
+    {
+        $request->validate([
+            'room_id' => ['required', 'integer', 'exists:chat_rooms,id'],
+        ]);
+
+        /** @var User $user */
+        $user = Auth::user();
+        $room = ChatRoom::query()->findOrFail((int) $request->query('room_id'));
+
+        if (! $room->isAccessibleBy($user)) {
+            abort(403);
+        }
+
+        return $room;
     }
 
     /**
@@ -131,6 +190,7 @@ class MessageController extends Controller
 
         return [
             'id' => $message->id,
+            'chat_room_id' => $message->chat_room_id,
             'user_id' => $message->user_id,
             'user_name' => $userName,
             'body' => $message->body,

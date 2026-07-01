@@ -12,8 +12,14 @@ class MessageDeleted implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
+    /**
+     * @param  array{preview: string, user_name: string|null, created_at: string|null}|null  $lastMessage
+     */
     public function __construct(
         public int $messageId,
+        public int $chatRoomId,
+        public ?array $lastMessage,
+        public string $lastMessageAt,
     ) {}
 
     /**
@@ -22,7 +28,7 @@ class MessageDeleted implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new PresenceChannel('chat'),
+            new PresenceChannel('chat.room.'.$this->chatRoomId),
         ];
     }
 
@@ -38,6 +44,9 @@ class MessageDeleted implements ShouldBroadcastNow
     {
         return [
             'id' => $this->messageId,
+            'chat_room_id' => $this->chatRoomId,
+            'last_message' => $this->lastMessage,
+            'last_message_at' => $this->lastMessageAt,
         ];
     }
 }

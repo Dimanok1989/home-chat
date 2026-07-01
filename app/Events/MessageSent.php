@@ -24,7 +24,7 @@ class MessageSent implements ShouldBroadcastNow
     public function broadcastOn(): array
     {
         return [
-            new PresenceChannel('chat'),
+            new PresenceChannel('chat.room.'.$this->message->chat_room_id),
         ];
     }
 
@@ -42,6 +42,7 @@ class MessageSent implements ShouldBroadcastNow
 
         return [
             'id' => $this->message->id,
+            'chat_room_id' => $this->message->chat_room_id,
             'user_id' => $this->message->user_id,
             'user_name' => $this->message->user?->name,
             'body' => $this->message->body,
