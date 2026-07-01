@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\ProfileUpdated;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -57,8 +58,12 @@ class ProfileController extends Controller
 
         $user->save();
 
+        $user->refresh();
+
+        broadcast(new ProfileUpdated($user));
+
         return response()->json([
-            'profile' => $this->formatProfile($user->fresh()),
+            'profile' => $this->formatProfile($user),
         ]);
     }
 

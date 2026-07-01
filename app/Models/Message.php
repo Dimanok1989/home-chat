@@ -46,7 +46,7 @@ class Message extends Model
     }
 
     /**
-     * @return array{preview: string, user_name: string|null, created_at: string|null}
+     * @return array{preview: string, user_id: int|null, user_name: string|null, created_at: string|null}
      */
     public static function previewPayload(self $message): array
     {
@@ -65,6 +65,7 @@ class Message extends Model
 
         return [
             'preview' => $preview,
+            'user_id' => $message->user_id,
             'user_name' => $message->user?->name,
             'created_at' => $message->created_at?->toIso8601String(),
         ];

@@ -229,6 +229,7 @@ function updateRoomPreview(message) {
 
     room.last_message = {
         preview: buildMessagePreview(message),
+        user_id: message.user_id ?? null,
         user_name: message.user_name ?? null,
         created_at: message.created_at ?? null,
     };
@@ -373,6 +374,55 @@ function handleMessageDeleted(payload) {
     updateRoomAfterDelete(payload);
 }
 
+function handleProfileUpdated(payload) {
+    const userId = Number(payload.id);
+
+    if (!userId) {
+        return;
+    }
+
+    const peer = {
+        id: userId,
+        display_name: payload.display_name,
+        has_avatar: payload.has_avatar,
+        avatar_url: payload.avatar_url ?? null,
+        initial: payload.initial,
+    };
+
+    for (const room of rooms.value) {
+        if (room.type === 'direct' && Number(room.peer?.id) === userId) {
+            room.peer = peer;
+            room.title = payload.display_name;
+        }
+
+        if (Number(room.last_message?.user_id) === userId) {
+            room.last_message = {
+                ...room.last_message,
+                user_name: payload.name,
+            };
+        }
+    }
+
+    for (const roomId of Object.keys(roomPresenceUsers.value)) {
+        const users = roomPresenceUsers.value[roomId] ?? [];
+        const index = users.findIndex((item) => Number(item.id) === userId);
+
+        if (index !== -1) {
+            const updated = [...users];
+            updated[index] = { ...updated[index], name: payload.name };
+            setRoomPresence(Number(roomId), updated);
+        }
+    }
+
+    if (Number(activeRoomId.value) > 0) {
+        for (const message of messages.value) {
+            if (Number(message.user_id) === userId) {
+                message.user_name = payload.name;
+            }
+        }
+    }
+}
+
 function subscribeRoomPresence(roomId) {
     if (!roomId || subscribedRoomIds.has(roomId)) {
         return;
@@ -392,6 +442,7 @@ function subscribeRoomPresence(roomId) {
         })
         .listen('.MessageSent', handleMessageSent)
         .listen('.MessageDeleted', handleMessageDeleted)
+        .listen('.ProfileUpdated', handleProfileUpdated)
         .error((err) => {
             console.error('Echo presence error', err);
             error.value = 'Ошибка подключения к чату';
