@@ -19,6 +19,10 @@ export default defineConfig({
         tailwindcss(),
     ],
     server: {
+        host: '0.0.0.0',
+        hmr: {
+            host: 'localhost',
+        },
         watch: {
             // Avoid ENOSPC when inotify max_user_watches is exhausted on Linux.
             usePolling: true,
