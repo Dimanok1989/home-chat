@@ -408,7 +408,7 @@ onUnmounted(() => {
                                     </span>
                                 </span>
                                 <span
-                                    v-if="room.unread_count > 0 && room.id !== activeRoomId"
+                                    v-if="room.unread_count > 0"
                                     class="flex h-5 min-w-5 shrink-0 self-center items-center justify-center rounded-full bg-blue-500 px-1.5 text-xs font-semibold text-white"
                                     :aria-label="`${room.unread_count} непрочитанных`"
                                 >

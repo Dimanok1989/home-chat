@@ -46,7 +46,9 @@ const roomContextMenu = ref(null);
 const replyingTo = ref(null);
 const highlightedMessageId = ref(null);
 const lastReadMessageId = ref(null);
-const firstUnreadMessageId = ref(null);
+const unreadSeparatorMessageId = ref(null);
+const sessionUnreadBaseline = ref(0);
+const seenUnreadMessageIds = ref(new Set());
 let highlightTimeout = null;
 let markReadTimer = null;
 let readObserver = null;
@@ -252,6 +254,83 @@ function updateRoomUnread(roomId, count) {
     }
 }
 
+function resetUnreadSession(unreadCount) {
+    sessionUnreadBaseline.value = unreadCount;
+    seenUnreadMessageIds.value = new Set();
+}
+
+function updateDisplayUnreadCount() {
+    if (!activeRoomId.value) {
+        return;
+    }
+
+    const remaining = Math.max(0, sessionUnreadBaseline.value - seenUnreadMessageIds.value.size);
+    updateRoomUnread(activeRoomId.value, remaining);
+}
+
+function getUnreadOthersMessageIds() {
+    const separatorId = unreadSeparatorMessageId.value;
+
+    if (!separatorId) {
+        return [];
+    }
+
+    return messages.value
+        .filter((message) => !message.is_mine && message.id >= separatorId)
+        .map((message) => message.id)
+        .sort((a, b) => a - b);
+}
+
+function computeContiguousReadUpTo() {
+    const lastRead = lastReadMessageId.value ?? 0;
+    let readUpTo = lastRead;
+
+    for (const id of getUnreadOthersMessageIds()) {
+        if (id <= lastRead) {
+            continue;
+        }
+
+        if (seenUnreadMessageIds.value.has(id)) {
+            readUpTo = id;
+        } else {
+            break;
+        }
+    }
+
+    return readUpTo;
+}
+
+function recordSeenUnreadMessage(messageId) {
+    const id = Number(messageId);
+    const message = messages.value.find((item) => item.id === id);
+
+    if (!message || message.is_mine) {
+        return;
+    }
+
+    const lastRead = lastReadMessageId.value ?? 0;
+
+    if (id <= lastRead || seenUnreadMessageIds.value.has(id)) {
+        return;
+    }
+
+    seenUnreadMessageIds.value = new Set([...seenUnreadMessageIds.value, id]);
+    updateDisplayUnreadCount();
+}
+
+function filterSeenAfterLastRead() {
+    const lastRead = lastReadMessageId.value ?? 0;
+    const nextSeen = new Set();
+
+    for (const id of seenUnreadMessageIds.value) {
+        if (id > lastRead) {
+            nextSeen.add(id);
+        }
+    }
+
+    seenUnreadMessageIds.value = nextSeen;
+}
+
 function upsertRoom(room) {
     const index = rooms.value.findIndex((item) => item.id === room.id);
     const isNew = index === -1;
@@ -328,6 +407,11 @@ function appendMessage(message) {
     const roomId = Number(message.chat_room_id);
 
     if (roomId === activeRoomId.value) {
+        if (!isMine && message.id > (lastReadMessageId.value ?? 0)) {
+            sessionUnreadBaseline.value += 1;
+            updateDisplayUnreadCount();
+        }
+
         nextTick(() => setupReadObserver());
     }
 }
@@ -366,15 +450,17 @@ async function loadMessages(roomId = activeRoomId.value) {
         messages.value = data.messages.map(mapMessage);
         hasMoreOlder.value = data.has_more;
         lastReadMessageId.value = data.last_read_message_id ?? null;
-        firstUnreadMessageId.value = data.first_unread_message_id ?? null;
-        updateRoomUnread(roomId, 0);
+        unreadSeparatorMessageId.value = data.first_unread_message_id ?? null;
+        resetUnreadSession(data.unread_count ?? 0);
+        updateDisplayUnreadCount();
     } catch (err) {
         notifyError(err.message, 'Не удалось загрузить сообщения');
     } finally {
         await nextTick();
         initialLoadDone.value = true;
         scrollToReadPosition();
-        setupReadObserver();
+        await nextTick();
+        requestAnimationFrame(() => setupReadObserver());
     }
 }
 
@@ -385,7 +471,7 @@ function scrollToReadPosition() {
         return;
     }
 
-    if (firstUnreadMessageId.value && lastReadMessageId.value) {
+    if (unreadSeparatorMessageId.value && lastReadMessageId.value) {
         const lastReadElement = container.querySelector(`[data-message-id="${lastReadMessageId.value}"]`);
 
         if (lastReadElement) {
@@ -394,7 +480,7 @@ function scrollToReadPosition() {
         }
     }
 
-    if (firstUnreadMessageId.value) {
+    if (unreadSeparatorMessageId.value) {
         const separator = container.querySelector('[data-unread-separator]');
 
         if (separator) {
@@ -414,7 +500,7 @@ function scheduleMarkRead(messageId) {
     }, 300);
 }
 
-async function markReadUpTo(messageId) {
+async function markReadUpTo(messageId, { skipObserverSetup = false } = {}) {
     if (!activeRoomId.value || !messageId) {
         return;
     }
@@ -444,17 +530,27 @@ async function markReadUpTo(messageId) {
 
         const data = await response.json();
         lastReadMessageId.value = data.last_read_message_id ?? id;
+        sessionUnreadBaseline.value = data.unread_count ?? 0;
+        filterSeenAfterLastRead();
+        updateDisplayUnreadCount();
 
-        if ((data.unread_count ?? 0) === 0) {
-            firstUnreadMessageId.value = null;
+        if (!skipObserverSetup) {
+            await nextTick();
+            setupReadObserver();
         }
-
-        updateRoomUnread(activeRoomId.value, data.unread_count ?? 0);
-        await nextTick();
-        setupReadObserver();
     } catch {
         // ignore transient read-mark failures
     }
+}
+
+async function flushUnreadProgress() {
+    const readUpTo = computeContiguousReadUpTo();
+
+    if (!activeRoomId.value || readUpTo <= (lastReadMessageId.value ?? 0)) {
+        return;
+    }
+
+    await markReadUpTo(readUpTo, { skipObserverSetup: true });
 }
 
 function teardownReadObserver() {
@@ -478,9 +574,6 @@ function setupReadObserver() {
     const lastRead = lastReadMessageId.value ?? 0;
 
     readObserver = new IntersectionObserver((entries) => {
-        let maxVisibleId = null;
-        const currentLastRead = lastReadMessageId.value ?? 0;
-
         for (const entry of entries) {
             if (!entry.isIntersecting) {
                 continue;
@@ -488,23 +581,17 @@ function setupReadObserver() {
 
             const id = Number(entry.target.dataset.messageId);
 
-            if (!id || id <= currentLastRead) {
+            if (!id) {
                 continue;
             }
 
-            const message = messages.value.find((item) => item.id === id);
-
-            if (!message || message.is_mine) {
-                continue;
-            }
-
-            if (maxVisibleId === null || id > maxVisibleId) {
-                maxVisibleId = id;
-            }
+            recordSeenUnreadMessage(id);
         }
 
-        if (maxVisibleId !== null) {
-            scheduleMarkRead(maxVisibleId);
+        const readUpTo = computeContiguousReadUpTo();
+
+        if (readUpTo > (lastReadMessageId.value ?? 0)) {
+            scheduleMarkRead(readUpTo);
         }
     }, {
         root: container,
@@ -578,12 +665,7 @@ function handleUnreadCountUpdated(payload) {
     const roomId = Number(payload.chat_room_id);
     const count = Number(payload.unread_count ?? 0);
 
-    if (!roomId) {
-        return;
-    }
-
-    if (roomId === activeRoomId.value) {
-        updateRoomUnread(roomId, 0);
+    if (!roomId || roomId === activeRoomId.value) {
         return;
     }
 
@@ -736,6 +818,7 @@ function leaveAllRoomChannels() {
 }
 
 function closeActiveRoom() {
+    void flushUnreadProgress();
     teardownReadObserver();
     activeRoomId.value = null;
     pendingDirectUser.value = null;
@@ -743,7 +826,8 @@ function closeActiveRoom() {
     hasMoreOlder.value = true;
     initialLoadDone.value = true;
     lastReadMessageId.value = null;
-    firstUnreadMessageId.value = null;
+    unreadSeparatorMessageId.value = null;
+    resetUnreadSession(0);
     error.value = '';
     mobileChatOpen.value = false;
     clearReply();
@@ -758,13 +842,15 @@ async function openRoom(roomId, { updateUrl = false, replaceUrl = false } = {}) 
     const isSameRoom = roomId === activeRoomId.value;
 
     if (!isSameRoom) {
+        await flushUnreadProgress();
         teardownReadObserver();
         activeRoomId.value = roomId;
         messages.value = [];
         hasMoreOlder.value = true;
         initialLoadDone.value = false;
         lastReadMessageId.value = null;
-        firstUnreadMessageId.value = null;
+        unreadSeparatorMessageId.value = null;
+        resetUnreadSession(0);
         error.value = '';
         clearReply();
 
@@ -1691,7 +1777,7 @@ onUnmounted(() => {
                         :loading-older="loadingOlder"
                         :loading="!initialLoadDone"
                         :highlighted-message-id="highlightedMessageId"
-                        :first-unread-message-id="firstUnreadMessageId"
+                        :first-unread-message-id="unreadSeparatorMessageId"
                         @scroll="handleMessagesScroll"
                         @open-viewer="openViewer"
                         @show-context-menu="showContextMenu"
