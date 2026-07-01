@@ -81,7 +81,7 @@ defineExpose({
                 @change="handleFileSelect"
             />
 
-            <div class="flex min-h-[50px] w-full items-end rounded-3xl border border-gray-200 bg-white px-1 dark:border-gray-600 dark:bg-gray-800">
+            <div class="flex min-h-[50px] w-full items-end rounded-3xl border border-gray-100 bg-white px-1 dark:border-gray-800 dark:bg-gray-900">
                 <button
                     type="button"
                     class="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 cursor-pointer"

@@ -913,14 +913,14 @@ onUnmounted(() => {
 <template>
     <div
         v-if="!appReady"
-        class="flex h-screen items-center justify-center bg-gray-100 dark:bg-gray-950"
+        class="flex h-screen items-center justify-center bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800"
     >
         <ChatSpinner size="lg" />
     </div>
 
     <div
         v-else
-        class="flex h-screen bg-gray-100 text-gray-900 dark:bg-gray-950 dark:text-gray-100"
+        class="flex h-screen bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 text-gray-900 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800 dark:text-gray-100"
     >
         <ChatSidebar
             :rooms="rooms"
@@ -932,14 +932,14 @@ onUnmounted(() => {
         />
 
         <main
-            class="relative flex min-w-0 flex-1 flex-col bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800"
+            class="relative flex min-w-0 flex-1 flex-col"
             @dragover="handleDragOver"
             @dragleave="handleDragLeave"
             @drop="handleDrop"
         >
             <ChatDragOverlay :visible="isDragging" />
 
-            <header class="flex w-full shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6 py-4 dark:border-gray-700 dark:bg-gray-900">
+            <header class="mx-auto flex w-full max-w-250 shrink-0 items-center justify-between rounded-b-lg border-b border-l border-r border-gray-100 bg-white px-6 py-4 dark:border-gray-800 dark:bg-gray-900">
                 <h1 class="text-lg font-semibold">{{ activeRoom?.title ?? 'Чат' }}</h1>
                 <ChatThemeToggle />
             </header>
@@ -952,7 +952,7 @@ onUnmounted(() => {
                     <ChatSpinner size="md" />
                 </div>
 
-                <div class="flex h-full w-full max-w-[800px] flex-col">
+                <div class="flex h-full w-full max-w-200 flex-col">
                     <ChatMessageList
                         ref="messageListRef"
                         :messages="messages"

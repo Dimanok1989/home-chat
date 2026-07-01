@@ -30,6 +30,20 @@ export function formatDate(isoString) {
 
     const date = new Date(isoString);
     const now = new Date();
+    const messageDay = calendarDayKey(isoString);
+    const todayDay = localDayKey(now);
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayDay = localDayKey(yesterday);
+
+    if (messageDay === todayDay) {
+        return 'Сегодня';
+    }
+
+    if (messageDay === yesterdayDay) {
+        return 'Вчера';
+    }
+
     const options = date.getFullYear() === now.getFullYear()
         ? { day: 'numeric', month: 'long' }
         : { day: 'numeric', month: 'long', year: 'numeric' };
@@ -37,14 +51,16 @@ export function formatDate(isoString) {
     return date.toLocaleDateString([], options);
 }
 
+function localDayKey(date) {
+    return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
 function calendarDayKey(isoString) {
     if (!isoString) {
         return '';
     }
 
-    const date = new Date(isoString);
-
-    return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    return localDayKey(new Date(isoString));
 }
 
 export function shouldShowDateSeparator(messages, index) {
