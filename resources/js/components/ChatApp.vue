@@ -1,16 +1,16 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useMediaQuery } from '../composables/useMediaQuery';
-import ChatConfirmModal from './chat/ChatConfirmModal.vue';
-import ChatCreateGroupModal from './chat/ChatCreateGroupModal.vue';
-import ChatDragOverlay from './chat/ChatDragOverlay.vue';
-import ChatImageContextMenu from './chat/ChatImageContextMenu.vue';
-import ChatImageViewer from './chat/ChatImageViewer.vue';
-import ChatMessageInput from './chat/ChatMessageInput.vue';
-import ChatMessageList from './chat/ChatMessageList.vue';
-import ChatSendImageModal from './chat/ChatSendImageModal.vue';
-import ChatSidebar from './chat/ChatSidebar.vue';
-import ChatSpinner from './chat/ChatSpinner.vue';
+import ChatConfirmModal from './chat/modals/ChatConfirmModal.vue';
+import ChatCreateGroupModal from './chat/modals/ChatCreateGroupModal.vue';
+import ChatDragOverlay from './chat/images/ChatDragOverlay.vue';
+import ChatImageContextMenu from './chat/images/ChatImageContextMenu.vue';
+import ChatImageViewer from './chat/images/ChatImageViewer.vue';
+import ChatMessageInput from './chat/messages/ChatMessageInput.vue';
+import ChatMessageList from './chat/messages/ChatMessageList.vue';
+import ChatSendImageModal from './chat/images/ChatSendImageModal.vue';
+import ChatSidebar from './chat/sidebar/ChatSidebar.vue';
+import ChatSpinner from './chat/shared/ChatSpinner.vue';
 
 const MESSAGES_PAGE_SIZE = 40;
 

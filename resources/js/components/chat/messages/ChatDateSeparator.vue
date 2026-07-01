@@ -1,5 +1,5 @@
 <script setup>
-import { formatDate } from '../../utils/chatFormat';
+import { formatDate } from '../../../utils/chatFormat';
 
 defineProps({
     date: {

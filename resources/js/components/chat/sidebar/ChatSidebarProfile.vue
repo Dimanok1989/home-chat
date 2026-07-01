@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import ChatUserAvatar from './ChatUserAvatar.vue';
+import ChatUserAvatar from '../shared/ChatUserAvatar.vue';
 
 const props = defineProps({
     profile: {

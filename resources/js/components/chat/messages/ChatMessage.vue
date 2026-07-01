@@ -1,5 +1,5 @@
 <script setup>
-import { formatDateTime, formatTime, isSystemMessage } from '../../utils/chatFormat';
+import { formatDateTime, formatTime, isSystemMessage } from '../../../utils/chatFormat';
 
 const props = defineProps({
     message: {

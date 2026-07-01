@@ -1,9 +1,10 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useTheme } from '../../composables/useTheme';
+import { useTheme } from '../../../composables/useTheme';
 import ChatEditProfileModal from './ChatEditProfileModal.vue';
+import ChatSidebarMenu from './menu/ChatSidebarMenu.vue';
 import ChatSidebarProfile from './ChatSidebarProfile.vue';
-import ChatUserAvatar from './ChatUserAvatar.vue';
+import ChatUserAvatar from '../shared/ChatUserAvatar.vue';
 
 const props = defineProps({
     rooms: {
@@ -38,8 +39,6 @@ const searchResults = ref([]);
 const searching = ref(false);
 let searchDebounceTimer = null;
 
-const menuOpen = ref(false);
-const menuRef = ref(null);
 const sidebarView = ref('chats');
 const profile = ref(null);
 const profileLoading = ref(false);
@@ -144,23 +143,8 @@ function handleRoomClick(roomId) {
     emit('selectRoom', roomId);
 }
 
-function toggleMenu() {
-    menuOpen.value = !menuOpen.value;
-}
-
-function closeMenu() {
-    menuOpen.value = false;
-}
-
 function handleToggleTheme() {
     toggleTheme();
-    closeMenu();
-}
-
-function handleDocumentClick(event) {
-    if (!menuRef.value?.contains(event.target)) {
-        closeMenu();
-    }
 }
 
 async function loadProfile({ showLoading = false } = {}) {
@@ -193,7 +177,6 @@ async function loadProfile({ showLoading = false } = {}) {
 }
 
 async function openProfile() {
-    closeMenu();
     sidebarView.value = 'profile';
 
     if (!profile.value) {
@@ -280,105 +263,30 @@ async function logout() {
 }
 
 onMounted(() => {
-    document.addEventListener('click', handleDocumentClick);
     void loadProfile();
 });
 
 onUnmounted(() => {
-    document.removeEventListener('click', handleDocumentClick);
     clearTimeout(searchDebounceTimer);
 });
 </script>
 
 <template>
-    <aside class="flex h-full w-full shrink-0 flex-col bg-white dark:bg-gray-900 md:my-3 md:ml-2 md:h-auto md:w-80 md:rounded-lg md:border md:border-gray-100 dark:md:border-gray-800">
-        <div class="border-b border-gray-200 p-3 dark:border-gray-700 md:hidden">
+    <aside class="flex h-full w-full shrink-0 flex-col bg-white dark:bg-gray-900 md:my-3 md:mx-2 md:h-auto md:w-80 md:rounded-lg md:border md:border-gray-100 dark:md:border-gray-800">
+        <div class="border-b border-gray-100 p-3 dark:border-gray-800 md:hidden">
             <h1 class="text-lg font-semibold">{{ sidebarView === 'profile' ? 'Профиль' : 'Чаты' }}</h1>
         </div>
 
-        <div v-if="sidebarView === 'chats'" class="border-b border-gray-200 p-3 dark:border-gray-700">
+        <div v-if="sidebarView === 'chats'" class="border-b border-gray-100 p-3 dark:border-gray-800">
             <div class="flex gap-2">
-                <div ref="menuRef" class="relative shrink-0">
-                    <button
-                        type="button"
-                        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-600 transition hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
-                        aria-label="Меню"
-                        aria-haspopup="true"
-                        :aria-expanded="menuOpen"
-                        @click.stop="toggleMenu"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            class="h-5 w-5"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <line x1="4" x2="20" y1="12" y2="12" />
-                            <line x1="4" x2="20" y1="6" y2="6" />
-                            <line x1="4" x2="20" y1="18" y2="18" />
-                        </svg>
-                    </button>
-
-                    <div
-                        v-if="menuOpen"
-                        class="absolute left-0 z-20 mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
-                    >
-                        <button
-                            type="button"
-                            class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
-                            @click="openProfile"
-                        >
-                            <ChatUserAvatar
-                                :avatar-url="menuAvatar.avatarUrl"
-                                :name="menuAvatar.name"
-                                :initial="menuAvatar.initial"
-                                size="xs"
-                            />
-                            <span>Профиль</span>
-                        </button>
-                        <button
-                            type="button"
-                            class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
-                            :aria-label="isDark ? 'Включить светлую тему' : 'Включить тёмную тему'"
-                            @click="handleToggleTheme"
-                        >
-                            <span class="flex h-6 w-6 shrink-0 items-center justify-center text-gray-600 dark:text-gray-300">
-                                <svg
-                                    v-if="isDark"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    class="h-4 w-4"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                >
-                                    <circle cx="12" cy="12" r="4" />
-                                    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-                                </svg>
-                                <svg
-                                    v-else
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    class="h-4 w-4"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                >
-                                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                                </svg>
-                            </span>
-                            <span>{{ isDark ? 'Светлая тема' : 'Тёмная тема' }}</span>
-                        </button>
-                    </div>
-                </div>
+                <ChatSidebarMenu
+                    :avatar-url="menuAvatar.avatarUrl"
+                    :avatar-name="menuAvatar.name"
+                    :avatar-initial="menuAvatar.initial"
+                    :is-dark="isDark"
+                    @open-profile="openProfile"
+                    @toggle-theme="handleToggleTheme"
+                />
 
                 <input
                     v-model="searchQuery"

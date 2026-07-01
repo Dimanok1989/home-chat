@@ -1,5 +1,5 @@
 <script setup>
-import { useTheme } from '../../composables/useTheme';
+import { useTheme } from '../../../composables/useTheme';
 
 const { isDark, toggleTheme } = useTheme();
 </script>

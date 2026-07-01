@@ -2,8 +2,8 @@
 import { computed, ref } from 'vue';
 import ChatDateSeparator from './ChatDateSeparator.vue';
 import ChatMessage from './ChatMessage.vue';
-import ChatSpinner from './ChatSpinner.vue';
-import { shouldShowDateSeparator } from '../../utils/chatFormat';
+import ChatSpinner from '../shared/ChatSpinner.vue';
+import { shouldShowDateSeparator } from '../../../utils/chatFormat';
 
 const props = defineProps({
     messages: {
