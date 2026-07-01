@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ChatRoom;
 use App\Models\User;
+use App\Support\BroadcastsChatRoomCreated;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -11,6 +12,8 @@ use Illuminate\Validation\ValidationException;
 
 class ChatRoomController extends Controller
 {
+    use BroadcastsChatRoomCreated;
+
     public function index(Request $request): JsonResponse
     {
         /** @var User $user */
@@ -106,6 +109,8 @@ class ChatRoomController extends Controller
                 ->latest('id')
                 ->limit(1),
         ]);
+
+        $this->broadcastChatRoomCreated($room, $user->id);
 
         return response()->json([
             'room' => $room->toApiArray($user),

@@ -63,7 +63,7 @@ watch(() => props.contextMenu, async (menu) => {
     <div
         v-if="contextMenu"
         ref="menuRef"
-        class="fixed z-[60] w-48 py-1 rounded-2xl border border-gray-100 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900"
+        class="fixed z-[60] py-1 rounded-2xl border border-gray-100 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900"
         :style="menuStyle"
     >
         <ChatImageContextMenuReplyItem

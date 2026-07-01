@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Events\MessageDeleted;
 use App\Events\MessageSent;
 use App\Models\ChatRoom;
+use App\Support\BroadcastsChatRoomCreated;
 use App\Models\Message;
 use App\Models\MessageAttachment;
 use App\Models\User;
@@ -17,6 +18,8 @@ use Illuminate\Validation\ValidationException;
 
 class MessageController extends Controller
 {
+    use BroadcastsChatRoomCreated;
+
     public function index(Request $request): JsonResponse
     {
         /** @var User $user */
@@ -126,6 +129,7 @@ class MessageController extends Controller
         }
 
         $currentUserId = $user->id;
+        $wasFirstMessage = $room->last_message_at === null;
 
         $message = DB::transaction(function () use ($body, $hasImage, $request, $currentUserId, $room, $replyToId) {
             $message = Message::query()->create([
@@ -161,6 +165,10 @@ class MessageController extends Controller
         });
 
         broadcast(new MessageSent($message));
+
+        if ($wasFirstMessage) {
+            $this->broadcastChatRoomCreated($room, $currentUserId);
+        }
 
         $response = [
             'message' => $this->formatMessage($message, $currentUserId),

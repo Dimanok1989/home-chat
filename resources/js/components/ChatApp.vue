@@ -480,6 +480,30 @@ function handleProfileUpdated(payload) {
     }
 }
 
+function subscribeUserChannel() {
+    if (!currentUserId.value) {
+        return;
+    }
+
+    window.Echo.private(`chat.user.${currentUserId.value}`)
+        .listen('.ChatRoomCreated', (payload) => {
+            if (payload.room) {
+                upsertRoom(payload.room);
+            }
+        })
+        .error((err) => {
+            console.error('Echo user channel error', err);
+        });
+}
+
+function leaveUserChannel() {
+    if (!currentUserId.value) {
+        return;
+    }
+
+    window.Echo.leave(`chat.user.${currentUserId.value}`);
+}
+
 function subscribeRoomPresence(roomId) {
     if (!roomId || subscribedRoomIds.has(roomId)) {
         return;
@@ -1341,6 +1365,7 @@ onMounted(async () => {
     window.addEventListener('popstate', handlePopState);
 
     try {
+        subscribeUserChannel();
         await loadRooms();
 
         const urlRoomId = getRoomIdFromUrl();
@@ -1375,6 +1400,7 @@ onUnmounted(() => {
     }
 
     closeSendModal();
+    leaveUserChannel();
     leaveAllRoomChannels();
 });
 </script>
