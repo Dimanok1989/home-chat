@@ -1,0 +1,33 @@
+{
+    "domain": "nginx",
+    "port": 6001,
+    "secure": false,
+    "verifyAuthPath": "/broadcasting/auth",
+    "verifyAuth": true,
+    "protocol": "http",
+    "sslCertPath": "",
+    "sslKeyPath": "",
+    "apiOriginPort": 80,
+    "allowCors": true,
+    "corsOrigin": "http://nginx:8080",
+    "corsMethods": ["GET", "POST"],
+    "corsHeaders": ["Content-Type", "Authorization", "X-CSRF-TOKEN", "X-Requested-With"],
+    "corsCredentials": true,
+    "database": "redis",
+    "databaseConfig": {
+        "redis": {
+            "host": "redis",
+            "port": "6379",
+            "keyPrefix": "chat-database-"
+        }
+    },
+    "devMode": true,
+    "host": "0.0.0.0",
+    "authEndpoint": "/broadcasting/auth",
+    "clients": [],
+    "referrers": [],
+    "protocols": ["http"],
+    "allowGuestAccess": false,
+    "authHost": "http://nginx",
+    "publishPresence": true
+}

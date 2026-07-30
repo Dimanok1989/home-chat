@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+if [ $# -gt 0 ]; then
+    if [ "$1" == "docker-compose" ]; then
+        shift 1
+        docker compose exec app \
+            composer "$@"
+        chmod --silent -R 777 ./vendor
+    elif [ "$1" == "docker-artisan" ]; then
+        shift 1
+        docker compose exec app \
+            php artisan "$@"
+    elif [ "$1" == "docker-npm" ]; then
+        shift 1
+        docker compose exec app \
+            npm "$@"
+    elif [ "$1" == "start" ]; then
+        shift 1
+        docker compose -f docker-compose.yml start
+    elif [ "$1" == "stop" ]; then
+        shift 1
+        docker compose -f docker-compose.yml stop
+    elif [ "$1" == "build" ]; then
+        shift 1
+        docker compose up -d --build --force-recreate
+    else
+        echo "./develop: Unknown command '$@'"
+    fi
+else
+    echo "./develop: You must specify some command"
+fi
