@@ -26,20 +26,19 @@ class UserSearchController extends Controller
             ->where('id', '!=', $currentUser->id)
             ->where(function ($builder) use ($pattern) {
                 $builder->where('name', 'like', $pattern)
-                    ->orWhere('username', 'like', $pattern)
-                    ->orWhere('email', 'like', $pattern);
+                    ->orWhere('username', 'like', $pattern);
             })
             ->orderBy('name')
             ->limit(20)
-            ->get(['id', 'name', 'username', 'email']);
+            ->get(['id', 'name', 'avatar_path', 'updated_at']);
 
         return response()->json([
             'users' => $users->map(fn (User $user) => [
                 'id' => $user->id,
                 'name' => $user->name,
-                'username' => $user->username,
-                'email' => $user->email,
-                'subtitle' => $user->username ?: $user->email,
+                'avatar_url' => $user->avatarUrl(),
+                'has_avatar' => (bool) $user->avatar_path,
+                'initial' => $user->initial(),
             ])->values()->all(),
         ]);
     }

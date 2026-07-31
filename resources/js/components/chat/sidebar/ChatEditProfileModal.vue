@@ -23,7 +23,6 @@ const props = defineProps({
 const emit = defineEmits(['close', 'save']);
 
 const firstName = ref('');
-const lastName = ref('');
 const avatarFile = ref(null);
 const avatarPreviewUrl = ref(null);
 const removeAvatar = ref(false);
@@ -42,7 +41,6 @@ watch(() => props.profile, () => {
 
 function resetForm() {
     firstName.value = props.profile?.name ?? '';
-    lastName.value = props.profile?.last_name ?? '';
     avatarFile.value = null;
     removeAvatar.value = false;
     revokePreview();
@@ -93,7 +91,6 @@ function handleSave() {
 
     emit('save', {
         name,
-        last_name: lastName.value.trim(),
         avatar: avatarFile.value,
         remove_avatar: removeAvatar.value,
     });
@@ -207,22 +204,6 @@ const currentAvatarUrl = () => {
                     />
                 </div>
 
-                <div>
-                    <label
-                        for="profile-last-name"
-                        class="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >
-                        Фамилия
-                    </label>
-                    <input
-                        id="profile-last-name"
-                        v-model="lastName"
-                        type="text"
-                        maxlength="255"
-                        :disabled="saving"
-                        class="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-                    />
-                </div>
             </div>
 
             <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">

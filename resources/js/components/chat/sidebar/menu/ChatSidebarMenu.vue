@@ -1,7 +1,8 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue';
 import ChatSidebarMenuProfileItem from './ChatSidebarMenuProfileItem.vue';
-import ChatSidebarMenuThemeItem from './ChatSidebarMenuThemeItem.vue';
+import ChatSidebarMenuLogoutItem from './ChatSidebarMenuLogoutItem.vue';
+import ChatConfirmModal from '../../modals/ChatConfirmModal.vue';
 
 defineProps({
     avatarUrl: {
@@ -22,10 +23,11 @@ defineProps({
     },
 });
 
-const emit = defineEmits(['openProfile', 'toggleTheme']);
+const emit = defineEmits(['openProfile', 'toggleTheme', 'logout']);
 
 const menuOpen = ref(false);
 const menuRef = ref(null);
+const showLogoutConfirm = ref(false);
 
 function toggleMenu() {
     menuOpen.value = !menuOpen.value;
@@ -43,6 +45,20 @@ function handleOpenProfile() {
 function handleToggleTheme() {
     emit('toggleTheme');
     closeMenu();
+}
+
+function handleLogoutClick() {
+    closeMenu();
+    showLogoutConfirm.value = true;
+}
+
+function handleLogoutConfirm() {
+    showLogoutConfirm.value = false;
+    emit('logout');
+}
+
+function handleLogoutCancel() {
+    showLogoutConfirm.value = false;
 }
 
 function handleDocumentClick(event) {
@@ -97,10 +113,19 @@ onUnmounted(() => {
                 @click="handleOpenProfile"
             />
             <hr class="my-1 border-t border-gray-100 dark:border-gray-800"/>
-            <ChatSidebarMenuThemeItem
-                :is-dark="isDark"
-                @click="handleToggleTheme"
-            />
+            <ChatSidebarMenuLogoutItem @click="handleLogoutClick" />
         </div>
+
+        <Teleport to="body">
+            <ChatConfirmModal
+                :show="showLogoutConfirm"
+                title="Выход"
+                message="Вы точно хотите выполнить выход?"
+                confirm-label="Выйти"
+                cancel-label="Отмена"
+                @close="handleLogoutCancel"
+                @confirm="handleLogoutConfirm"
+            />
+        </Teleport>
     </div>
 </template>

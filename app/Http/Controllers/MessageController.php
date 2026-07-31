@@ -319,6 +319,8 @@ class MessageController extends Controller
             'chat_room_id' => $message->chat_room_id,
             'user_id' => $message->user_id,
             'user_name' => $userName,
+            'user_avatar_url' => $message->user?->avatarUrl(),
+            'user_initial' => $message->user?->initial(),
             'body' => $message->body,
             'created_at' => $message->created_at?->toIso8601String(),
             'is_mine' => $currentUserId !== null && $message->user_id === $currentUserId,

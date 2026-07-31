@@ -28,12 +28,10 @@ class AuthController extends Controller
             'privacy_consent.accepted' => 'Необходимо согласие на обработку персональных данных.',
         ]);
 
-        $field = filter_var($validated['login'], FILTER_VALIDATE_EMAIL) ? 'email' : 'username';
-
         $remember = $request->boolean('remember');
 
         if (! Auth::attempt([
-            $field => $validated['login'],
+            'username' => $validated['login'],
             'password' => $validated['password'],
         ], $remember)) {
             return back()

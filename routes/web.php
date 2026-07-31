@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\CallController;
 use App\Http\Controllers\ChatAttachmentController;
 use App\Http\Controllers\ChatRoomController;
 use App\Http\Controllers\MessageController;
@@ -21,6 +22,7 @@ Route::post('/logout', [AuthController::class, 'logout'])
 Route::middleware('auth')->group(function () {
     Route::view('/chat', 'chat');
     Route::view('/chat/{room}', 'chat')->where('room', '[0-9]+');
+    Route::view('/call', 'chat');
     Route::get('/api/chat-rooms', [ChatRoomController::class, 'index']);
     Route::post('/api/chat-rooms/direct', [ChatRoomController::class, 'storeDirect']);
     Route::post('/api/chat-rooms/group', [ChatRoomController::class, 'storeGroup']);
@@ -36,4 +38,6 @@ Route::middleware('auth')->group(function () {
     Route::delete('/api/messages/{message}', [MessageController::class, 'destroy']);
     Route::get('/api/chat/files/{attachment}/{token}', [ChatAttachmentController::class, 'show'])
         ->name('chat.files.show');
+    Route::post('/api/call/signal', [CallController::class, 'signal']);
+    Route::post('/api/call/history', [CallController::class, 'history']);
 });

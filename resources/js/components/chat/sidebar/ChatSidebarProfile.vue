@@ -30,10 +30,6 @@ const infoRows = computed(() => {
         rows.push({ label: 'Username', value: `@${props.profile.username}` });
     }
 
-    if (props.profile.email) {
-        rows.push({ label: 'Email', value: props.profile.email });
-    }
-
     return rows;
 });
 </script>

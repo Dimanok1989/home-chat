@@ -26,7 +26,6 @@ class ProfileController extends Controller
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'last_name' => ['nullable', 'string', 'max:255'],
             'avatar' => ['nullable', 'image', 'max:2048'],
             'remove_avatar' => ['nullable', 'boolean'],
         ]);
@@ -35,7 +34,6 @@ class ProfileController extends Controller
         $user = Auth::user();
 
         $user->name = trim($validated['name']);
-        $user->last_name = isset($validated['last_name']) ? trim($validated['last_name']) : null;
 
         if ($request->boolean('remove_avatar')) {
             $this->deleteAvatar($user);
@@ -72,10 +70,8 @@ class ProfileController extends Controller
         return [
             'id' => $user->id,
             'name' => $user->name,
-            'last_name' => $user->last_name,
             'display_name' => $user->displayName(),
             'username' => $user->username,
-            'email' => $user->email,
             'has_avatar' => (bool) $user->avatar_path,
             'avatar_url' => $user->avatarUrl(),
             'initial' => $user->initial(),

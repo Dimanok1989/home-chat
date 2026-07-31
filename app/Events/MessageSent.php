@@ -45,6 +45,8 @@ class MessageSent implements ShouldBroadcastNow
             'chat_room_id' => $this->message->chat_room_id,
             'user_id' => $this->message->user_id,
             'user_name' => $this->message->user?->name,
+            'user_avatar_url' => $this->message->user?->avatarUrl(),
+            'user_initial' => $this->message->user?->initial(),
             'body' => $this->message->body,
             'created_at' => $this->message->created_at?->toIso8601String(),
             'is_system' => $this->message->user?->name === null,

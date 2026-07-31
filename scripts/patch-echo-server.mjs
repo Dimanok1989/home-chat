@@ -42,21 +42,26 @@ function patchPresenceChannel() {
 
     let source = readFileSync(target, 'utf8');
 
-    // Fix: guard against undefined member when filtering on leave
-    const needle = "members = members.filter(function (m) { return m.socketId != member.socketId; });";
-    const patch = "members = members.filter(function (m) { return m && member && m.socketId != member.socketId; });";
+    // Fix 1: guard against undefined member when filtering on leave
+    const filterNeedle = "members = members.filter(function (m) { return m.socketId != member.socketId; });";
+    const filterPatch = "members = members.filter(function (m) { return m && member && m.socketId != member.socketId; });";
 
-    if (!source.includes(needle)) {
-        console.error('patch-echo-server: unexpected presence-channel.js format');
-        return;
+    if (source.includes(filterNeedle)) {
+        source = source.replace(filterNeedle, filterPatch);
+        console.log('patch-echo-server: presence-channel.js filter guard applied');
     }
 
-    if (source.includes(patch)) {
-        return;
+    // Fix 2: guard against undefined member when deleting socketId on leave
+    const deleteNeedle = "delete member.socketId;";
+    const deletePatch = "if (member) { delete member.socketId; }";
+
+    if (source.includes(deleteNeedle) && !source.includes(deletePatch)) {
+        source = source.replace(deleteNeedle, deletePatch);
+        console.log('patch-echo-server: presence-channel.js delete guard applied');
     }
 
-    writeFileSync(target, source.replace(needle, patch));
-    console.log('patch-echo-server: presence-channel.js undefined member guard applied');
+    writeFileSync(target, source);
+    console.log('patch-echo-server: presence-channel.js patches applied');
 }
 
 patchPrivateChannel();

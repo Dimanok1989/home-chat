@@ -29,7 +29,7 @@ const props = defineProps({
     },
 });
 
-const emit = defineEmits(['scroll', 'openViewer', 'showContextMenu', 'scrollToMessage']);
+const emit = defineEmits(['scroll', 'openViewer', 'showContextMenu', 'scrollToMessage', 'startDirectFromAvatar']);
 
 const messagesContainer = ref(null);
 
@@ -67,6 +67,7 @@ defineExpose({
                 @open-viewer="emit('openViewer', $event)"
                 @show-context-menu="(event, payload) => emit('showContextMenu', event, payload)"
                 @scroll-to-message="emit('scrollToMessage', $event)"
+                @start-direct-from-avatar="emit('startDirectFromAvatar', $event)"
             />
 
             <ChatUnreadSeparator
