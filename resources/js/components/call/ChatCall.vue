@@ -98,7 +98,7 @@ const ICE_SERVERS = {
     ],
 };
 
-const callState = ref('idle'); // idle | calling | ringing | connected | ended
+const callPhase = ref('idle'); // idle | pre-call | calling | ringing | connected | ended
 const localStream = ref(null);
 const remoteStream = ref(null);
 const peerConnection = ref(null);
@@ -120,14 +120,16 @@ let ringbackTone = null;
 const peerName = computed(() => props.peerUser?.display_name ?? 'Собеседник');
 const peerInitial = computed(() => props.peerUser?.initial ?? '?');
 
-const isIncoming = computed(() => callState.value === 'ringing');
-const isCalling = computed(() => callState.value === 'calling');
-const isConnected = computed(() => callState.value === 'connected');
-const isEnded = computed(() => callState.value === 'ended');
-const isRinging = computed(() => callState.value === 'ringing');
+const isPreCall = computed(() => callPhase.value === 'pre-call');
+const isIncoming = computed(() => callPhase.value === 'ringing');
+const isCalling = computed(() => callPhase.value === 'calling');
+const isConnected = computed(() => callPhase.value === 'connected');
+const isEnded = computed(() => callPhase.value === 'ended');
+const isRinging = computed(() => callPhase.value === 'ringing');
 
 const statusText = computed(() => {
-    switch (callState.value) {
+    switch (callPhase.value) {
+        case 'pre-call': return 'Готов к звонку';
         case 'calling': return 'Звоним...';
         case 'ringing': return 'Входящий звонок...';
         case 'connected': return formatDuration(callDuration.value);
@@ -430,7 +432,7 @@ async function getLocalStream() {
         return stream;
     } catch (err) {
         console.error('Failed to get local stream:', err);
-        callState.value = 'ended';
+        callPhase.value = 'ended';
         return null;
     }
 }
@@ -475,7 +477,7 @@ function createPeerConnection() {
     pc.oniceconnectionstatechange = () => {
         console.log('[ChatCall] oniceconnectionstatechange:', pc.iceConnectionState);
         if (pc.iceConnectionState === 'connected') {
-            callState.value = 'connected';
+            callPhase.value = 'connected';
             stopRingbackTone();
             playConnectedChime();
             startDurationTimer();
@@ -523,7 +525,7 @@ function drainPendingIceCandidates() {
 
 async function startCall() {
     console.log('[ChatCall] startCall: начало исходящего звонка, peer:', props.peerUser?.id, props.peerUser?.display_name);
-    callState.value = 'calling';
+    callPhase.value = 'calling';
     hangupSent = false;
     receivedHangup = false;
 
@@ -575,7 +577,7 @@ async function startCall() {
 
 async function acceptCall() {
     console.log('[ChatCall] acceptCall: принятие входящего звонка, peer:', props.peerUser?.id, props.peerUser?.display_name);
-    callState.value = 'calling';
+    callPhase.value = 'calling';
     hangupSent = false;
     receivedHangup = false;
 
@@ -655,10 +657,18 @@ function rejectCall() {
 }
 
 function endCall() {
-    console.log('[ChatCall] endCall: завершение звонка, state:', callState.value, 'endReason:', endReason.value, 'hangupSent:', hangupSent, 'receivedHangup:', receivedHangup);
+    console.log('[ChatCall] endCall: завершение звонка, phase:', callPhase.value, 'endReason:', endReason.value, 'hangupSent:', hangupSent, 'receivedHangup:', receivedHangup);
+
+    // If we're in pre-call phase, just close without any signaling or history
+    if (callPhase.value === 'pre-call') {
+        cleanupMedia();
+        emit('end-call');
+        return;
+    }
+
     // Determine call result before cleaning up state
-    const wasAnswered = callState.value === 'connected' || callState.value === 'calling';
-    const wasRinging = callState.value === 'ringing';
+    const wasAnswered = callPhase.value === 'connected' || callPhase.value === 'calling';
+    const wasRinging = callPhase.value === 'ringing';
     const duration = callDuration.value;
     const initiatedByUs = !hangupSent && !receivedHangup;
 
@@ -681,6 +691,40 @@ function endCall() {
         sendSignal('hangup', { reason: wasRinging ? 'rejected' : 'ended' });
     }
 
+    cleanupMedia();
+
+    // Play the end-of-call chime only if the call was actually connected.
+    // Skip for rejected/busy calls that never connected.
+    if (wasAnswered) {
+        playDisconnectedChime();
+    }
+
+    // Save call history message in the chat room.
+    // Only save when WE initiated the end (clicked end/reject button, or ICE failed on our side).
+    // When we receive a 'hangup' from the other peer, they already saved the history,
+    // and the MessageSent broadcast will deliver it to us.
+    if (initiatedByUs) {
+        saveCallHistory(wasAnswered, duration);
+    }
+
+    // Decide whether to show the "ended" screen or close immediately:
+    // - Show "ended" screen only when the call was rejected or the user was busy
+    //   (so the user sees the reason: "отклонил(а) вызов" or "сейчас разговаривает")
+    // - Close immediately in all other cases:
+    //   * Caller hung up before answer (no need to show anything)
+    //   * Call was connected and ended normally
+    if (endReason.value === 'rejected' || endReason.value === 'busy') {
+        callPhase.value = 'ended';
+    } else {
+        emit('end-call');
+    }
+}
+
+/**
+ * Clean up media resources (peer connection, streams, audio elements, timers).
+ * Shared between endCall() and pre-call cancellation.
+ */
+function cleanupMedia() {
     if (peerConnection.value) {
         peerConnection.value.close();
         peerConnection.value = null;
@@ -709,32 +753,6 @@ function endCall() {
     receivedHangup = false;
     stopDurationTimer();
     stopRingbackTone();
-
-    // Play the end-of-call chime only if the call was actually connected.
-    // Skip for rejected/busy calls that never connected.
-    if (wasAnswered) {
-        playDisconnectedChime();
-    }
-
-    // Save call history message in the chat room.
-    // Only save when WE initiated the end (clicked end/reject button, or ICE failed on our side).
-    // When we receive a 'hangup' from the other peer, they already saved the history,
-    // and the MessageSent broadcast will deliver it to us.
-    if (initiatedByUs) {
-        saveCallHistory(wasAnswered, duration);
-    }
-
-    // Decide whether to show the "ended" screen or close immediately:
-    // - Show "ended" screen only when the call was rejected or the user was busy
-    //   (so the user sees the reason: "отклонил(а) вызов" or "сейчас разговаривает")
-    // - Close immediately in all other cases:
-    //   * Caller hung up before answer (no need to show anything)
-    //   * Call was connected and ended normally
-    if (endReason.value === 'rejected' || endReason.value === 'busy') {
-        callState.value = 'ended';
-    } else {
-        emit('end-call');
-    }
 }
 
 function saveCallHistory(wasAnswered, duration) {
@@ -786,8 +804,14 @@ function toggleSpeaker() {
 }
 
 function goBack() {
+    // endCall() already emits 'end-call' for pre-call phase,
+    // so we only emit here for other phases where endCall() may
+    // show the "ended" screen instead of emitting.
+    const wasPreCall = callPhase.value === 'pre-call';
     endCall();
-    emit('end-call');
+    if (!wasPreCall) {
+        emit('end-call');
+    }
 }
 
 // Signaling
@@ -824,7 +848,7 @@ const pendingOffer = ref(null);
 
 async function handleCallSignal(data) {
     const callerId = Number(data.caller_user_id);
-    console.log('[ChatCall] handleCallSignal: получен сигнал type:', data.type, 'caller:', callerId, 'current peer:', props.peerUser?.id, 'callState:', callState.value);
+    console.log('[ChatCall] handleCallSignal: получен сигнал type:', data.type, 'caller:', callerId, 'current peer:', props.peerUser?.id, 'callPhase:', callPhase.value);
 
     if (callerId !== Number(props.peerUser?.id)) {
         console.log('[ChatCall] handleCallSignal: callerId не совпадает с peerUser, игнорируем');
@@ -835,7 +859,7 @@ async function handleCallSignal(data) {
         case 'offer':
             console.log('[ChatCall] handleCallSignal: получен offer, sdp length:', data.sdp?.length);
             // If already connected, notify the caller that we're busy
-            if (callState.value === 'connected') {
+            if (callPhase.value === 'connected') {
                 console.log('[ChatCall] handleCallSignal: уже на связи, отправляем busy');
                 sendSignal('hangup', { reason: 'busy' });
                 return;
@@ -844,20 +868,20 @@ async function handleCallSignal(data) {
             // If we're already processing this call (calling state), ignore duplicate offers.
             // This prevents a duplicate 'offer' signal from triggering a 'busy' hangup
             // when the callee has already accepted the call.
-            if (callState.value === 'calling') {
+            if (callPhase.value === 'calling') {
                 console.log('[ChatCall] handleCallSignal: уже в процессе звонка, игнорируем дубликат offer');
                 return;
             }
 
             // If we already have a pending offer (ringing state), ignore duplicates.
             // This prevents overwriting the pending offer with a stale duplicate.
-            if (callState.value === 'ringing' && pendingOffer.value) {
+            if (callPhase.value === 'ringing' && pendingOffer.value) {
                 console.log('[ChatCall] handleCallSignal: уже звенит, игнорируем дубликат offer');
                 return;
             }
 
             pendingOffer.value = new RTCSessionDescription({ type: 'offer', sdp: sanitizeSdp(data.sdp) });
-            callState.value = 'ringing';
+            callPhase.value = 'ringing';
             startIncomingRingtone();
             console.log('[ChatCall] handleCallSignal: offer принят, state -> ringing');
             break;
@@ -932,12 +956,12 @@ onMounted(() => {
     if (props.incomingOffer) {
         console.log('[ChatCall] onMounted: восстановление входящего звонка из incomingOffer, sdp length:', props.incomingOffer.sdp?.length);
         pendingOffer.value = new RTCSessionDescription({ type: 'offer', sdp: sanitizeSdp(props.incomingOffer.sdp) });
-        callState.value = 'ringing';
+        callPhase.value = 'ringing';
         startIncomingRingtone();
     } else {
-        // Outgoing call — start immediately
-        console.log('[ChatCall] onMounted: исходящий звонок, запуск startCall');
-        startCall();
+        // Outgoing call — show pre-call screen with "Начать звонок" button
+        console.log('[ChatCall] onMounted: исходящий звонок, показываем экран pre-call');
+        callPhase.value = 'pre-call';
     }
 });
 
@@ -964,11 +988,45 @@ onUnmounted(() => {
             {{ statusText }}
         </p>
 
-        <!-- Call controls -->
-        <div class="flex items-center gap-6">
-            <!-- Mute button (hidden when call ended) -->
+        <!-- Pre-call screen (outgoing, waiting for user to start) -->
+        <div v-if="isPreCall" class="flex flex-col items-center gap-6">
             <button
-                v-if="!isEnded"
+                type="button"
+                class="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg transition hover:bg-emerald-600 hover:scale-105 active:scale-95"
+                aria-label="Начать звонок"
+                @click="startCall"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-9 w-9"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                </svg>
+            </button>
+
+            <span class="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                Начать звонок
+            </span>
+
+            <button
+                type="button"
+                class="mt-2 rounded-lg bg-white px-6 py-2 text-sm font-medium text-gray-700 shadow transition hover:bg-gray-100 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                @click="goBack"
+            >
+                Отмена
+            </button>
+        </div>
+
+        <!-- Call controls (calling / ringing / connected) -->
+        <div v-if="!isPreCall && !isEnded" class="flex items-center gap-6">
+            <!-- Mute button -->
+            <button
                 type="button"
                 class="flex h-14 w-14 items-center justify-center rounded-full transition"
                 :class="isMuted
@@ -1014,7 +1072,6 @@ onUnmounted(() => {
 
             <!-- End / Reject call button -->
             <button
-                v-if="!isEnded"
                 type="button"
                 class="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-white shadow-lg transition hover:bg-red-600"
                 :class="isIncoming ? 'animate-pulse' : ''"
@@ -1057,9 +1114,8 @@ onUnmounted(() => {
                 </svg>
             </button>
 
-            <!-- Speaker button (hidden when call ended) -->
+            <!-- Speaker button -->
             <button
-                v-if="!isEnded"
                 type="button"
                 class="flex h-14 w-14 items-center justify-center rounded-full transition"
                 :class="!isSpeakerOn
