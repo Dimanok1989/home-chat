@@ -1,0 +1,41 @@
+services:
+  app-prod:
+    build:
+      context: .
+      dockerfile: docker/php/prod/Dockerfile
+    container_name: homechat-app-prod
+    working_dir: /var/www
+    volumes:
+      - .:/var/www
+    environment:
+      - APP_ENV=development
+      - APP_DEBUG=true
+    networks:
+      - homechat
+
+  nginx-prod:
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile
+    container_name: homechat-nginx-prod
+    ports:
+      - "8080:80"
+    volumes:
+      - ./public:/var/www/public
+      - ./docker/nginx/prod/default.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - homechat
+
+  echo:
+    build:
+      context: .
+      dockerfile: docker/echo/Dockerfile
+    container_name: homechat-echo
+    environment:
+      - REDIS_PORT=${REDIS_PORT:-6379}
+    networks:
+      - homechat
+
+networks:
+  homechat:
+    driver: bridge
