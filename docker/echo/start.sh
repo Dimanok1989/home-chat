@@ -10,4 +10,8 @@ if [ -f "$PRESENCE_CHANNEL" ]; then
     echo "Patched presence-channel.js"
 fi
 
+# Substitute environment variables in the config file
+envsubst < /app/laravel-echo-server.json > /tmp/laravel-echo-server.json
+mv /tmp/laravel-echo-server.json /app/laravel-echo-server.json
+
 exec laravel-echo-server start

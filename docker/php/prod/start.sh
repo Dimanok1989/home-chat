@@ -18,7 +18,7 @@ fi
 
 # Install Node dependencies if node_modules doesn't exist
 if [ ! -d node_modules ]; then
-    npm install --no-interaction --without dev
+    npm install
 fi
 
 # Ensure storage and bootstrap/cache directories exist with proper permissions
@@ -42,6 +42,6 @@ php artisan migrate --force --graceful 2>/dev/null || true
 php artisan storage:link 2>/dev/null || true
 
 # Start Vite HMR in background for hot-reload (only in dev)
-npm run dev &
+npm run build &
 
 exec php-fpm
