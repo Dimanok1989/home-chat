@@ -33,7 +33,7 @@ const currentImage = computed(() => props.images[props.index] ?? null);
             </p>
             <button
                 type="button"
-                class="rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+                class="cursor-pointer rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
                 title="Закрыть"
                 @click="emit('close')"
             >
@@ -44,13 +44,13 @@ const currentImage = computed(() => props.images[props.index] ?? null);
         </div>
 
         <div
-            class="relative flex flex-1 items-center justify-center px-4 pb-4"
+            class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden px-4 pb-4"
             @click.self="emit('close')"
         >
             <button
                 v-if="index > 0"
                 type="button"
-                class="absolute left-4 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
+                class="absolute left-4 z-10 cursor-pointer rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
                 title="Новее"
                 @click="emit('goNewer')"
             >
@@ -62,14 +62,14 @@ const currentImage = computed(() => props.images[props.index] ?? null);
             <img
                 :src="currentImage.url"
                 :alt="currentImage.original_name"
-                class="max-h-full max-w-full object-contain"
+                class="min-h-0 max-h-full max-w-full object-contain"
                 @contextmenu.prevent="emit('showContextMenu', $event, currentImage)"
             />
 
             <button
                 v-if="index < images.length - 1"
                 type="button"
-                class="absolute right-4 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
+                class="absolute right-4 z-10 cursor-pointer rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
                 title="Старше"
                 @click="emit('goOlder')"
             >
