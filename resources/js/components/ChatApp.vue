@@ -406,13 +406,21 @@ function appendMessage(message) {
 
     const roomId = Number(message.chat_room_id);
 
-    if (roomId === activeRoomId.value) {
+    if (roomId === Number(activeRoomId.value)) {
         if (!isMine && message.id > (lastReadMessageId.value ?? 0)) {
             sessionUnreadBaseline.value += 1;
             updateDisplayUnreadCount();
         }
 
-        nextTick(() => setupReadObserver());
+        nextTick(() => {
+            const container = getMessagesContainer();
+
+            if (container) {
+                container.scrollTop = 0;
+            }
+
+            setupReadObserver();
+        });
     }
 }
 
@@ -679,7 +687,7 @@ function handleMessageSent(payload) {
         void loadRooms().then(() => {
             updateRoomPreview(payload);
 
-            if (roomId === activeRoomId.value) {
+            if (roomId === Number(activeRoomId.value)) {
                 appendMessage(payload);
             }
         });
@@ -689,7 +697,7 @@ function handleMessageSent(payload) {
 
     updateRoomPreview(payload);
 
-    if (roomId === activeRoomId.value) {
+    if (roomId === Number(activeRoomId.value)) {
         appendMessage(payload);
     }
 }
