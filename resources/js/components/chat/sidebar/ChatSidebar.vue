@@ -39,6 +39,7 @@ const searchResults = ref([]);
 const searching = ref(false);
 let searchDebounceTimer = null;
 
+const activeTab = ref('users');
 const sidebarView = ref('chats');
 const profile = ref(null);
 const profileLoading = ref(false);
@@ -46,6 +47,9 @@ const profileError = ref('');
 const showEditProfileModal = ref(false);
 const savingProfile = ref(false);
 const editProfileError = ref('');
+
+const directRooms = computed(() => props.rooms.filter((room) => room.type === 'direct'));
+const groupRooms = computed(() => props.rooms.filter((room) => room.type === 'global' || room.type === 'group'));
 
 const showSearchResults = computed(() => searchQuery.value.trim().length > 0 && sidebarView.value === 'chats');
 
@@ -218,13 +222,12 @@ function closeEditProfile() {
     editProfileError.value = '';
 }
 
-async function saveProfile({ name, last_name, avatar, remove_avatar }) {
+async function saveProfile({ name, avatar, remove_avatar }) {
     savingProfile.value = true;
     editProfileError.value = '';
 
     const formData = new FormData();
     formData.append('name', name);
-    formData.append('last_name', last_name ?? '');
 
     if (avatar) {
         formData.append('avatar', avatar);
@@ -294,7 +297,7 @@ onUnmounted(() => {
         </div>
 
         <div v-if="sidebarView === 'chats'" class="border-b border-gray-100 p-3 dark:border-gray-800">
-            <div class="flex gap-2">
+            <div class="flex items-center gap-2">
                 <ChatSidebarMenu
                     :avatar-url="menuAvatar.avatarUrl"
                     :avatar-name="menuAvatar.name"
@@ -302,23 +305,68 @@ onUnmounted(() => {
                     :is-dark="isDark"
                     @open-profile="openProfile"
                     @toggle-theme="handleToggleTheme"
+                    @logout="logout"
                 />
 
-                <input
-                    v-model="searchQuery"
-                    type="search"
-                    placeholder="Поиск по имени, email, username"
-                    class="min-w-0 flex-1 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
-                />
+                <button
+                    type="button"
+                    class="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-gray-600 transition hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-900"
+                    :aria-label="isDark ? 'Включить светлую тему' : 'Включить тёмную тему'"
+                    @click="handleToggleTheme"
+                >
+                    <svg
+                        v-if="isDark"
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-5 w-5"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <circle cx="12" cy="12" r="4" />
+                        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+                    </svg>
+                    <svg
+                        v-else
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-5 w-5"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                </button>
             </div>
 
-            <button
-                type="button"
-                class="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
-                @click="emit('openCreateGroup')"
-            >
-                Новая группа
-            </button>
+            <!-- Tabs -->
+            <div class="mt-3 flex gap-1 rounded-lg bg-gray-100 p-0.5 dark:bg-gray-800">
+                <button
+                    type="button"
+                    class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+                    :class="activeTab === 'users'
+                        ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
+                    @click="activeTab = 'users'"
+                >
+                    Личные чаты
+                </button>
+                <button
+                    type="button"
+                    class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+                    :class="activeTab === 'chats'
+                        ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
+                    @click="activeTab = 'chats'"
+                >
+                    Групповые
+                </button>
+            </div>
         </div>
 
         <div class="flex-1 overflow-y-auto">
@@ -333,61 +381,138 @@ onUnmounted(() => {
             />
 
             <template v-else>
-                <div v-if="showSearchResults" class="p-2">
-                    <p class="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                        Пользователи
-                    </p>
+                <!-- Users tab (direct chats) -->
+                <div v-if="activeTab === 'users'" class="p-2">
+                    <input
+                        v-model="searchQuery"
+                        type="search"
+                        placeholder="Поиск по имени"
+                        class="mb-2 w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                    />
 
-                    <p v-if="searching" class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
-                        Поиск...
-                    </p>
+                    <!-- Search results -->
+                    <template v-if="showSearchResults">
+                        <p class="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            Пользователи
+                        </p>
 
-                    <ul v-else-if="searchResults.length > 0">
-                        <li
-                            v-for="user in searchResults"
-                            :key="user.id"
-                            class="mb-1"
-                        >
-                            <button
-                                type="button"
-                                class="w-full rounded-lg px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
-                                @click="handleUserClick(user)"
+                        <p v-if="searching" class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                            Поиск...
+                        </p>
+
+                        <ul v-else-if="searchResults.length > 0">
+                            <li
+                                v-for="user in searchResults"
+                                :key="user.id"
+                                class="mb-1"
                             >
-                                <span class="block truncate text-sm font-medium">{{ user.name }}</span>
-                                <span class="block truncate text-xs text-gray-500 dark:text-gray-400">
-                                    {{ user.subtitle }}
-                                </span>
-                            </button>
-                        </li>
-                    </ul>
+                                <button
+                                    type="button"
+                                    class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
+                                    @click="handleUserClick(user)"
+                                >
+                                    <ChatUserAvatar
+                                        :avatar-url="user.avatar_url"
+                                        :name="user.name"
+                                        :initial="user.initial"
+                                        size="sm"
+                                    />
+                                    <span class="block truncate text-sm font-medium">{{ user.name }}</span>
+                                </button>
+                            </li>
+                        </ul>
 
-                    <p v-else class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
-                        Никого не найдено
-                    </p>
+                        <p v-else class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                            Никого не найдено
+                        </p>
+                    </template>
+
+                    <!-- Direct chats list -->
+                    <template v-else>
+                        <p class="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            Пользователи
+                        </p>
+
+                        <ul>
+                            <li
+                                v-for="room in directRooms"
+                                :key="room.id"
+                                class="mb-1"
+                            >
+                                <button
+                                    type="button"
+                                    class="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors"
+                                    :class="[
+                                        room.id === activeRoomId
+                                            ? 'bg-blue-50 dark:bg-blue-950/40'
+                                            : 'hover:bg-gray-100 dark:hover:bg-gray-800',
+                                        'cursor-context-menu',
+                                    ]"
+                                    @click="handleRoomClick(room.id)"
+                                    @contextmenu.prevent="handleRoomContextMenu($event, room)"
+                                >
+                                    <ChatUserAvatar
+                                        :avatar-url="roomAvatar(room).avatarUrl"
+                                        :name="roomAvatar(room).name"
+                                        :initial="roomAvatar(room).initial"
+                                        :online="roomAvatar(room).online"
+                                        size="md"
+                                    />
+                                    <span class="min-w-0 flex-1">
+                                        <span class="block truncate text-sm font-semibold">{{ room.title }}</span>
+                                        <span
+                                            class="mt-0.5 block truncate text-xs"
+                                            :class="isEmptyRoomPreview(room)
+                                                ? 'italic text-gray-500/50 dark:text-gray-400/50'
+                                                : 'text-gray-500 dark:text-gray-400'"
+                                        >
+                                            {{ formatRoomPreview(room) }}
+                                        </span>
+                                    </span>
+                                    <span
+                                        v-if="room.unread_count > 0"
+                                        class="flex h-5 min-w-5 shrink-0 self-center items-center justify-center rounded-full bg-blue-500 px-1.5 text-xs font-semibold text-white"
+                                        :aria-label="`${room.unread_count} непрочитанных`"
+                                    >
+                                        {{ formatUnreadCount(room.unread_count) }}
+                                    </span>
+                                </button>
+                            </li>
+                        </ul>
+
+                        <p v-if="directRooms.length === 0" class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                            Нет диалогов
+                        </p>
+                    </template>
                 </div>
 
+                <!-- Chats tab (global + group) -->
                 <div v-else class="p-2">
+                    <button
+                        type="button"
+                        class="mb-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+                        @click="emit('openCreateGroup')"
+                    >
+                        Новая группа
+                    </button>
+
                     <p class="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                         Чаты
                     </p>
 
                     <ul>
                         <li
-                            v-for="room in rooms"
+                            v-for="room in groupRooms"
                             :key="room.id"
                             class="mb-1"
                         >
                             <button
                                 type="button"
                                 class="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors"
-                                :class="[
-                                    room.id === activeRoomId
-                                        ? 'bg-blue-50 dark:bg-blue-950/40'
-                                        : 'hover:bg-gray-100 dark:hover:bg-gray-800',
-                                    room.type === 'direct' ? 'cursor-context-menu' : '',
-                                ]"
+                                :class="room.id === activeRoomId
+                                    ? 'bg-blue-50 dark:bg-blue-950/40'
+                                    : 'hover:bg-gray-100 dark:hover:bg-gray-800'"
                                 @click="handleRoomClick(room.id)"
-                                @contextmenu.prevent="handleRoomContextMenu($event, room)"
                             >
                                 <ChatUserAvatar
                                     :avatar-url="roomAvatar(room).avatarUrl"
@@ -418,7 +543,7 @@ onUnmounted(() => {
                         </li>
                     </ul>
 
-                    <p v-if="rooms.length === 0" class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                    <p v-if="groupRooms.length === 0" class="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
                         Нет чатов
                     </p>
                 </div>

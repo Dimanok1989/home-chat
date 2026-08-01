@@ -91,6 +91,58 @@ export function isSystemMessage(message) {
     return !message.user_name;
 }
 
+const CALL_BODY_PREFIX = '\u{1F4DE}';
+
+/**
+ * Check if a message is a call history message.
+ * Call messages have a body starting with the 📞 prefix.
+ */
+export function isCallMessage(message) {
+    return message?.body?.startsWith(CALL_BODY_PREFIX) ?? false;
+}
+
+/**
+ * Parse a call message body and return display info.
+ *
+ * @param {object} message
+ * @param {boolean} message.is_mine - Whether the message belongs to the current user
+ * @param {string} message.body - The message body (e.g. "📞 02:34" or "📞 Звонок был отклонен")
+ * @returns {{ icon: string, label: string, duration: string|null }|null}
+ */
+export function parseCallMessage(message) {
+    if (!isCallMessage(message)) return null;
+
+    const body = message.body.slice(CALL_BODY_PREFIX.length).trim();
+    const isOutgoing = message.is_mine;
+
+    // Check if it's a rejected call (body contains "Звонок был отклонен")
+    if (body.includes('Звонок был отклонен')) {
+        return {
+            icon: 'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z',
+            label: 'Звонок был отклонен',
+            duration: null,
+        };
+    }
+
+    // Check if it's a cancelled call (caller hung up before answer)
+    if (body.includes('Звонок был отменен')) {
+        return {
+            icon: 'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z',
+            label: 'Звонок был отменен',
+            duration: null,
+        };
+    }
+
+    // Answered call — body contains the duration (e.g. "02:34")
+    return {
+        icon: isOutgoing
+            ? 'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z'
+            : 'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z',
+        label: isOutgoing ? 'Исходящий звонок' : 'Входящий звонок',
+        duration: body,
+    };
+}
+
 export function buildMessagePreview(message) {
     const hasAttachments = (message?.attachments ?? []).length > 0;
     const body = message?.body;

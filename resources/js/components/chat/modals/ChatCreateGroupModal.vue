@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch } from 'vue';
+import ChatUserAvatar from '../shared/ChatUserAvatar.vue';
 
 const props = defineProps({
     show: {
@@ -199,9 +200,14 @@ function handleKeydown(event) {
                                 :disabled="creating"
                                 @click="toggleUser(user)"
                             >
-                                <span>
+                                <span class="flex items-center gap-3">
+                                    <ChatUserAvatar
+                                        :avatar-url="user.avatar_url"
+                                        :name="user.name"
+                                        :initial="user.initial"
+                                        size="xs"
+                                    />
                                     <span class="block font-medium">{{ user.name }}</span>
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400">{{ user.subtitle }}</span>
                                 </span>
                                 <span
                                     class="text-xs font-semibold"

@@ -32,7 +32,7 @@
                     @csrf
 
                     <div>
-                        <label for="login" class="mb-2 block text-sm font-medium text-gray-700">Email или username</label>
+                        <label for="login" class="mb-2 block text-sm font-medium text-gray-700">Username</label>
                         <input
                             id="login"
                             name="login"

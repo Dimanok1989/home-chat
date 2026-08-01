@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useMediaQuery } from '../composables/useMediaQuery';
 import { useToast } from '../composables/useToast';
 import { buildMessagePreview } from '../utils/chatFormat';
+import ChatCall from './call/ChatCall.vue';
 import ChatConfirmModal from './chat/modals/ChatConfirmModal.vue';
 import ChatCreateGroupModal from './chat/modals/ChatCreateGroupModal.vue';
 import ChatDragOverlay from './chat/images/ChatDragOverlay.vue';
@@ -69,6 +70,10 @@ const groupError = ref('');
 const isMobile = useMediaQuery('(max-width: 767px)');
 const mobileChatOpen = ref(false);
 const pendingDirectUser = ref(null);
+const callActive = ref(false);
+const callPeerUser = ref(null);
+const incomingCallOffer = ref(null);
+const callSignal = ref(null);
 
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
 const { message: toastMessage, visible: toastVisible, showError: showToastError, hide: hideToast } = useToast();
@@ -759,6 +764,121 @@ function handleProfileUpdated(payload) {
     }
 }
 
+function findPeerUser(userId) {
+    const id = Number(userId);
+
+    for (const room of rooms.value) {
+        if (room.type === 'direct' && Number(room.peer?.id) === id) {
+            return room.peer;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Restore a pending incoming call from sessionStorage after page reload.
+ * Returns { offer, peer } or null if no pending call exists.
+ */
+function restorePendingCall() {
+    try {
+        const raw = sessionStorage.getItem('pending_call');
+        if (!raw) return null;
+
+        const parsed = JSON.parse(raw);
+        if (!parsed?.offer?.caller_user_id || !parsed?.peer?.id) {
+            sessionStorage.removeItem('pending_call');
+            return null;
+        }
+
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+function handleIncomingCallSignal(data) {
+    const callerId = Number(data.caller_user_id);
+    console.log('[ChatApp] handleIncomingCallSignal: получен сигнал type:', data.type, 'caller:', callerId, 'callActive:', callActive.value);
+
+    if (!callerId) {
+        console.warn('[ChatApp] handleIncomingCallSignal: нет callerId, игнорируем');
+        return;
+    }
+
+    // During an active call, handle signals based on type
+    if (callActive.value) {
+        console.log('[ChatApp] handleIncomingCallSignal: активный звонок, peer:', callPeerUser.value?.id, 'тип сигнала:', data.type);
+        // If a new 'offer' arrives from a different user while we're in a call,
+        // send a 'busy' response so the third user's call ends immediately
+        // with the reason "Пользователь сейчас разговаривает".
+        if (data.type === 'offer' && callerId !== Number(callPeerUser.value?.id)) {
+            console.log('[ChatApp] handleIncomingCallSignal: offer от другого пользователя, отправляем busy');
+            fetch('/api/call/signal', {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken,
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    target_user_id: callerId,
+                    type: 'hangup',
+                    payload: { reason: 'busy' },
+                }),
+            }).then((res) => {
+                console.log('[ChatApp] handleIncomingCallSignal: busy отправлен, status:', res.status);
+            }).catch((err) => {
+                console.error('[ChatApp] Failed to send busy signal:', err);
+            });
+            return;
+        }
+
+        // Forward all other signals to ChatCall
+        console.log('[ChatApp] handleIncomingCallSignal: пересылка сигнала в ChatCall:', data.type);
+        callSignal.value = { ...data, _ts: Date.now() };
+        return;
+    }
+
+    // Only process 'offer' when no active call
+    if (data.type !== 'offer') {
+        console.log('[ChatApp] handleIncomingCallSignal: нет активного звонка и тип не offer, игнорируем');
+        return;
+    }
+
+    console.log('[ChatApp] handleIncomingCallSignal: входящий offer, caller:', callerId, 'sdp length:', data.sdp?.length);
+
+    let peer = findPeerUser(callerId);
+
+    if (!peer) {
+        console.log('[ChatApp] handleIncomingCallSignal: peer не найден в комнатах, создаём временный');
+        peer = {
+            id: callerId,
+            display_name: `User #${callerId}`,
+            has_avatar: false,
+            avatar_url: null,
+            initial: '?',
+        };
+    }
+
+    incomingCallOffer.value = data;
+    callPeerUser.value = peer;
+    callActive.value = true;
+    history.pushState({ call: true }, '', '/call');
+
+    // Persist incoming call in sessionStorage so it survives page reload
+    try {
+        sessionStorage.setItem('pending_call', JSON.stringify({
+            offer: data,
+            peer: peer,
+        }));
+        console.log('[ChatApp] handleIncomingCallSignal: звонок сохранён в sessionStorage');
+    } catch (e) {
+        console.warn('[ChatApp] handleIncomingCallSignal: не удалось сохранить в sessionStorage:', e);
+    }
+}
+
 function subscribeUserChannel() {
     if (!currentUserId.value) {
         return;
@@ -771,6 +891,7 @@ function subscribeUserChannel() {
             }
         })
         .listen('.UnreadCountUpdated', handleUnreadCountUpdated)
+        .listen('.CallSignal', handleIncomingCallSignal)
         .error((err) => {
             console.error('Echo user channel error', err);
         });
@@ -826,6 +947,10 @@ function leaveAllRoomChannels() {
 }
 
 function closeActiveRoom() {
+    if (callActive.value) {
+        endCall();
+    }
+
     void flushUnreadProgress();
     teardownReadObserver();
     activeRoomId.value = null;
@@ -839,6 +964,38 @@ function closeActiveRoom() {
     error.value = '';
     mobileChatOpen.value = false;
     clearReply();
+}
+
+function startCall() {
+    if (!activeRoom.value || activeRoom.value.type !== 'direct') {
+        return;
+    }
+
+    incomingCallOffer.value = null;
+    callPeerUser.value = activeRoom.value.peer;
+    callActive.value = true;
+    history.pushState({ call: true }, '', '/call');
+}
+
+function endCall() {
+    callActive.value = false;
+    callPeerUser.value = null;
+    incomingCallOffer.value = null;
+
+    // Clear persisted call state
+    try {
+        sessionStorage.removeItem('pending_call');
+    } catch {
+        // non-critical
+    }
+
+    if (window.location.pathname === '/call') {
+        if (activeRoomId.value) {
+            history.replaceState({ roomId: activeRoomId.value }, '', `/chat/${activeRoomId.value}`);
+        } else {
+            history.replaceState({}, '', '/chat');
+        }
+    }
 }
 
 async function openRoom(roomId, { updateUrl = false, replaceUrl = false } = {}) {
@@ -878,17 +1035,17 @@ async function openRoom(roomId, { updateUrl = false, replaceUrl = false } = {}) 
 
 function goBackToMenu() {
     if (isMobile.value && mobileChatOpen.value) {
-        if (pendingDirectUser.value || getRoomIdFromUrl() === null) {
-            closeActiveRoom();
-            syncUrlWithRoom(null, { replace: true });
-            return;
-        }
-
-        history.back();
+        closeActiveRoom();
+        syncUrlWithRoom(null, { replace: true });
     }
 }
 
 function handlePopState() {
+    if (callActive.value) {
+        endCall();
+        return;
+    }
+
     const roomId = getRoomIdFromUrl();
 
     if (roomId && isKnownRoom(roomId)) {
@@ -1659,6 +1816,17 @@ onMounted(async () => {
         subscribeUserChannel();
         await loadRooms();
 
+        // Check for a pending call that survived page reload
+        const pendingCall = restorePendingCall();
+
+        if (pendingCall) {
+            // Restore the incoming call UI
+            incomingCallOffer.value = pendingCall.offer;
+            callPeerUser.value = pendingCall.peer;
+            callActive.value = true;
+            history.replaceState({ call: true }, '', '/call');
+        }
+
         const urlRoomId = getRoomIdFromUrl();
 
         if (urlRoomId) {
@@ -1737,7 +1905,7 @@ onUnmounted(() => {
                 v-if="isChatOpen"
                 class="z-20 mx-auto flex w-full max-w-250 shrink-0 items-center border-b border-gray-100 bg-white px-4 py-4 pt-[max(1rem,env(safe-area-inset-top))] dark:border-gray-800 dark:bg-gray-900 md:rounded-b-lg md:border-l md:border-r md:px-6 md:pt-4"
             >
-                <div class="flex min-w-0 items-center gap-2">
+                <div class="flex min-w-0 flex-1 items-center gap-2">
                     <button
                         v-if="isMobile && mobileChatOpen"
                         type="button"
@@ -1761,6 +1929,29 @@ onUnmounted(() => {
                     </button>
                     <h1 class="truncate text-lg font-semibold">{{ activeRoom?.title }}</h1>
                 </div>
+
+                <!-- Call button -->
+                <button
+                    v-if="activeRoom?.type === 'direct'"
+                    type="button"
+                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-emerald-600 transition hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/30"
+                    aria-label="Позвонить"
+                    title="Позвонить"
+                    @click="startCall"
+                >
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-5 w-5"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                    </svg>
+                </button>
             </header>
 
             <div
@@ -1790,6 +1981,7 @@ onUnmounted(() => {
                         @open-viewer="openViewer"
                         @show-context-menu="showContextMenu"
                         @scroll-to-message="scrollToMessage"
+                        @start-direct-from-avatar="startDirect"
                     />
                 </div>
 
@@ -1808,6 +2000,21 @@ onUnmounted(() => {
                 </div>
             </div>
         </main>
+
+        <!-- Call overlay -->
+        <div
+            v-if="callActive && callPeerUser"
+            class="fixed inset-0 z-50"
+        >
+            <ChatCall
+                :room-id="activeRoomId"
+                :peer-user="callPeerUser"
+                :current-user-id="currentUserId"
+                :incoming-offer="incomingCallOffer"
+                :signal="callSignal"
+                @end-call="endCall"
+            />
+        </div>
 
         <Teleport to="body">
             <ChatToast
