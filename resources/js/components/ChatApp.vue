@@ -1027,13 +1027,8 @@ async function openRoom(roomId, { updateUrl = false, replaceUrl = false } = {}) 
 
 function goBackToMenu() {
     if (isMobile.value && mobileChatOpen.value) {
-        if (pendingDirectUser.value || getRoomIdFromUrl() === null) {
-            closeActiveRoom();
-            syncUrlWithRoom(null, { replace: true });
-            return;
-        }
-
-        history.back();
+        closeActiveRoom();
+        syncUrlWithRoom(null, { replace: true });
     }
 }
 
