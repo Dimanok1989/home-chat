@@ -28,14 +28,26 @@ final class LinkPreviewUrlGuard
             return false;
         }
 
-        if (filter_var($host, FILTER_VALIDATE_IP)) {
-            return ! self::isPrivateIp($host);
+        $hostForIpCheck = self::stripIpv6Brackets($host);
+
+        if (filter_var($hostForIpCheck, FILTER_VALIDATE_IP)) {
+            return ! self::isPrivateIp($hostForIpCheck);
         }
 
         $ips = @gethostbynamel($host) ?: [];
 
         foreach ($ips as $ip) {
             if (self::isPrivateIp($ip)) {
+                return false;
+            }
+        }
+
+        $aaaaRecords = @dns_get_record($host, DNS_AAAA) ?: [];
+
+        foreach ($aaaaRecords as $record) {
+            $ip = (string) ($record['ipv6'] ?? '');
+
+            if ($ip !== '' && self::isPrivateIp($ip)) {
                 return false;
             }
         }
@@ -50,6 +62,15 @@ final class LinkPreviewUrlGuard
         }
 
         return self::isAllowed($url);
+    }
+
+    private static function stripIpv6Brackets(string $host): string
+    {
+        if (str_starts_with($host, '[') && str_ends_with($host, ']')) {
+            return substr($host, 1, -1);
+        }
+
+        return $host;
     }
 
     private static function isPrivateIp(string $ip): bool

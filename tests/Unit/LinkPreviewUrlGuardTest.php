@@ -29,4 +29,11 @@ class LinkPreviewUrlGuardTest extends TestCase
         $this->assertFalse(LinkPreviewUrlGuard::isAllowed('http://10.0.0.5/'));
         $this->assertFalse(LinkPreviewUrlGuard::isAllowed('http://172.16.5.1/'));
     }
+
+    public function test_rejects_private_ipv6_literals(): void
+    {
+        $this->assertFalse(LinkPreviewUrlGuard::isAllowed('http://[::1]/'));
+        $this->assertFalse(LinkPreviewUrlGuard::isAllowed('http://[fc00::1]/'));
+        $this->assertFalse(LinkPreviewUrlGuard::isAllowed('http://[fe80::1]/'));
+    }
 }
