@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue';
 import ChatSidebarMenuProfileItem from './ChatSidebarMenuProfileItem.vue';
+import ChatSidebarMenuInviteItem from './ChatSidebarMenuInviteItem.vue';
 import ChatSidebarMenuLogoutItem from './ChatSidebarMenuLogoutItem.vue';
 import ChatConfirmModal from '../../modals/ChatConfirmModal.vue';
 
@@ -23,7 +24,7 @@ defineProps({
     },
 });
 
-const emit = defineEmits(['openProfile', 'toggleTheme', 'logout']);
+const emit = defineEmits(['openProfile', 'openInvite', 'toggleTheme', 'logout']);
 
 const menuOpen = ref(false);
 const menuRef = ref(null);
@@ -40,6 +41,11 @@ function closeMenu() {
 function handleOpenProfile() {
     closeMenu();
     emit('openProfile');
+}
+
+function handleOpenInvite() {
+    closeMenu();
+    emit('openInvite');
 }
 
 function handleToggleTheme() {
@@ -112,6 +118,7 @@ onUnmounted(() => {
                 :initial="avatarInitial"
                 @click="handleOpenProfile"
             />
+            <ChatSidebarMenuInviteItem @click="handleOpenInvite" />
             <hr class="my-1 border-t border-gray-100 dark:border-gray-800"/>
             <ChatSidebarMenuLogoutItem @click="handleLogoutClick" />
         </div>

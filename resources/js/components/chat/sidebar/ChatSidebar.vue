@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useTheme } from '../../../composables/useTheme';
 import ChatEditProfileModal from './ChatEditProfileModal.vue';
+import ChatInvitePage from './ChatInvitePage.vue';
 import ChatSidebarMenu from './menu/ChatSidebarMenu.vue';
 import ChatSidebarProfile from './ChatSidebarProfile.vue';
 import ChatUserAvatar from '../shared/ChatUserAvatar.vue';
@@ -215,6 +216,10 @@ async function openProfile() {
     }
 }
 
+function openInvite() {
+    sidebarView.value = 'invite';
+}
+
 function backToChats() {
     sidebarView.value = 'chats';
 }
@@ -367,7 +372,7 @@ onUnmounted(() => {
         </div>
 
         <div class="border-b border-gray-100 p-3 dark:border-gray-800 md:hidden">
-            <h1 class="text-lg font-semibold">{{ sidebarView === 'profile' ? 'Профиль' : 'Чаты' }}</h1>
+            <h1 class="text-lg font-semibold">{{ sidebarView === 'profile' ? 'Профиль' : sidebarView === 'invite' ? 'Приглашение' : 'Чаты' }}</h1>
         </div>
 
         <div v-if="sidebarView === 'chats'" class="border-b border-gray-100 p-3 dark:border-gray-800">
@@ -378,6 +383,7 @@ onUnmounted(() => {
                     :avatar-initial="menuAvatar.initial"
                     :is-dark="isDark"
                     @open-profile="openProfile"
+                    @open-invite="openInvite"
                     @toggle-theme="handleToggleTheme"
                     @logout="logout"
                 />
@@ -464,6 +470,11 @@ onUnmounted(() => {
                 @back="backToChats"
                 @logout="logout"
                 @edit="openEditProfile"
+            />
+
+            <ChatInvitePage
+                v-else-if="sidebarView === 'invite'"
+                @back="backToChats"
             />
 
             <template v-else>
