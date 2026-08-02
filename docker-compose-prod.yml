@@ -13,6 +13,11 @@ services:
       - APP_DEBUG=false
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      # Host user for npm/composer writes into the bind mount (public/build, etc.)
+      # so assets can be rebuilt on the host without chown / docker restart.
+      # Override in .env if your uid/gid is not 1000: HOST_UID=1000 HOST_GID=1000
+      - HOST_UID=${HOST_UID:-1000}
+      - HOST_GID=${HOST_GID:-1000}
     depends_on:
       - redis
     networks:
@@ -40,6 +45,27 @@ services:
       dockerfile: docker/redis/Dockerfile
     container_name: homechat-redis-prod
     restart: unless-stopped
+    networks:
+      - homechat
+
+  queue-prod:
+    build:
+      context: .
+      dockerfile: docker/php/prod/Dockerfile
+    container_name: homechat-queue-prod
+    restart: unless-stopped
+    working_dir: /var/www
+    entrypoint: ["php", "artisan", "queue:work", "--sleep=1", "--tries=3", "--timeout=30"]
+    volumes:
+      - .:/var/www
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - redis
+      - app-prod
     networks:
       - homechat
 
