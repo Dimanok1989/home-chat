@@ -33,7 +33,7 @@ final class OgMetaParser
         foreach ($keys as $key) {
             $content = self::findMetaContent($html, $key);
 
-            if ($content !== null && $content !== '') {
+            if ($content !== null) {
                 return $content;
             }
         }
@@ -45,11 +45,11 @@ final class OgMetaParser
     {
         $content = self::findMetaContentViaDom($html, $key);
 
-        if ($content !== null) {
-            return $content;
+        if ($content === null) {
+            $content = self::findMetaContentViaRegex($html, $key);
         }
 
-        return self::findMetaContentViaRegex($html, $key);
+        return self::nullableTrim($content);
     }
 
     private static function findMetaContentViaDom(string $html, string $key): ?string

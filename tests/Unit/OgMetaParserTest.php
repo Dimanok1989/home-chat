@@ -40,4 +40,22 @@ class OgMetaParserTest extends TestCase
         $this->assertSame('https://example.com/img/a.jpg', $meta['image_url']);
         $this->assertNull($meta['description']);
     }
+
+    public function test_whitespace_only_og_meta_falls_back(): void
+    {
+        $html = <<<'HTML'
+        <html><head>
+          <meta property="og:title" content="   " />
+          <meta name="twitter:title" content="     " />
+          <meta property="og:description" content="   " />
+          <meta name="twitter:description" content="Twitter Desc" />
+          <title>Real Title</title>
+        </head></html>
+        HTML;
+
+        $meta = OgMetaParser::parse($html, 'https://example.com/page');
+
+        $this->assertSame('Real Title', $meta['title']);
+        $this->assertSame('Twitter Desc', $meta['description']);
+    }
 }
