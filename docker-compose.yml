@@ -78,7 +78,11 @@ services:
     ports:
       - "6001:6001"
     environment:
+      - REDIS_HOST=${ECHO_REDIS_HOST:-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-chat-database-}
+      - ECHO_AUTH_HOST=${ECHO_AUTH_HOST:-http://nginx}
+      - ECHO_CORS_ORIGIN=${ECHO_CORS_ORIGIN:-http://localhost:8080}
     depends_on:
       - redis
       - app

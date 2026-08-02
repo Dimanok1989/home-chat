@@ -9,16 +9,16 @@
     "sslKeyPath": "",
     "apiOriginPort": 80,
     "allowCors": true,
-    "corsOrigin": "http://nginx:8080",
+    "corsOrigin": "${ECHO_CORS_ORIGIN}",
     "corsMethods": ["GET", "POST"],
     "corsHeaders": ["Content-Type", "Authorization", "X-CSRF-TOKEN", "X-Requested-With"],
     "corsCredentials": true,
     "database": "redis",
     "databaseConfig": {
         "redis": {
-            "host": "redis",
+            "host": "${REDIS_HOST}",
             "port": "${REDIS_PORT}",
-            "keyPrefix": "chat-database-"
+            "keyPrefix": "${REDIS_KEY_PREFIX}"
         }
     },
     "devMode": true,
@@ -28,6 +28,6 @@
     "referrers": [],
     "protocols": ["http"],
     "allowGuestAccess": false,
-    "authHost": "http://nginx",
+    "authHost": "${ECHO_AUTH_HOST}",
     "publishPresence": true
 }
