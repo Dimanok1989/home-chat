@@ -5,6 +5,7 @@ use App\Http\Controllers\CallController;
 use App\Http\Controllers\ChatAttachmentController;
 use App\Http\Controllers\ChatRoomController;
 use App\Http\Controllers\InvitationController;
+use App\Http\Controllers\LinkPreviewImageController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\UserAvatarController;
@@ -43,6 +44,8 @@ Route::middleware('auth')->group(function () {
     Route::delete('/api/messages/{message}', [MessageController::class, 'destroy']);
     Route::get('/api/chat/files/{attachment}/{token}', [ChatAttachmentController::class, 'show'])
         ->name('chat.files.show');
+    Route::get('/api/chat/link-previews/{linkPreview}/image/{token}', [LinkPreviewImageController::class, 'show'])
+        ->name('chat.link-previews.image');
     Route::post('/api/call/signal', [CallController::class, 'signal']);
     Route::post('/api/call/history', [CallController::class, 'history']);
 

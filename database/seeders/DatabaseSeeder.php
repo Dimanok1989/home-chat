@@ -15,28 +15,21 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        User::factory()->create([
-            'name' => 'Test User',
-            'username' => 'testuser',
-            'password' => bcrypt('password'),
-        ]);
+        $users = [
+            ['username' => 'testuser', 'name' => 'Test User'],
+            ['username' => 'alice', 'name' => 'Alice Johnson'],
+            ['username' => 'bob', 'name' => 'Bob Smith'],
+            ['username' => 'charlie', 'name' => 'Charlie Brown'],
+        ];
 
-        User::factory()->create([
-            'name' => 'Alice Johnson',
-            'username' => 'alice',
-            'password' => bcrypt('password'),
-        ]);
-
-        User::factory()->create([
-            'name' => 'Bob Smith',
-            'username' => 'bob',
-            'password' => bcrypt('password'),
-        ]);
-
-        User::factory()->create([
-            'name' => 'Charlie Brown',
-            'username' => 'charlie',
-            'password' => bcrypt('password'),
-        ]);
+        foreach ($users as $user) {
+            User::query()->firstOrCreate(
+                ['username' => $user['username']],
+                [
+                    'name' => $user['name'],
+                    'password' => bcrypt('password'),
+                ],
+            );
+        }
     }
 }

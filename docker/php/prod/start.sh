@@ -1,6 +1,27 @@
 #!/bin/bash
 set -e
 
+HOST_UID="${HOST_UID:-1000}"
+HOST_GID="${HOST_GID:-1000}"
+
+# Align image user `laravel` with the host bind-mount owner so writes
+# (npm build, composer) are owned by the same uid outside the container.
+if id laravel >/dev/null 2>&1; then
+    current_uid="$(id -u laravel)"
+    current_gid="$(id -g laravel)"
+    if [ "$current_uid" != "$HOST_UID" ]; then
+        usermod -u "$HOST_UID" laravel
+    fi
+    if [ "$current_gid" != "$HOST_GID" ]; then
+        groupmod -g "$HOST_GID" laravel || true
+        usermod -g "$HOST_GID" laravel || true
+    fi
+fi
+
+run_as_host() {
+    runuser -u laravel -- "$@"
+}
+
 # Copy .env.docker if .env doesn't exist
 if [ ! -f .env ]; then
     cp .env.docker .env
@@ -13,12 +34,12 @@ fi
 
 # Install PHP dependencies if vendor doesn't exist
 if [ ! -d vendor ]; then
-    composer install --no-interaction --prefer-dist
+    run_as_host composer install --no-interaction --prefer-dist
 fi
 
 # Install Node dependencies if node_modules doesn't exist
 if [ ! -d node_modules ]; then
-    npm install
+    run_as_host npm install
 fi
 
 # Ensure storage and bootstrap/cache directories exist with proper permissions
@@ -41,7 +62,9 @@ php artisan migrate --force --graceful 2>/dev/null || true
 # Create storage link
 php artisan storage:link 2>/dev/null || true
 
-# Start Vite HMR in background for hot-reload (only in dev)
-npm run build &
+# Frontend production build as host user (writable public/build on the host)
+mkdir -p public/build
+chown -R "${HOST_UID}:${HOST_GID}" public/build
+run_as_host npm run build
 
 exec php-fpm

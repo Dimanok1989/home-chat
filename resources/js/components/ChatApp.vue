@@ -25,6 +25,8 @@ const rooms = ref([]);
 const activeRoomId = ref(null);
 const roomPresenceUsers = ref({});
 const subscribedRoomIds = new Set();
+/** @type {Map<number, object>} */
+const pendingLinkPreviews = new Map();
 const newMessage = ref('');
 const currentUserId = ref(
     Number(document.querySelector('meta[name="user-id"]')?.getAttribute('content') ?? 0) || null,
@@ -397,19 +399,60 @@ function updateRoomAfterDelete(payload) {
     sortRooms();
 }
 
+function applyLinkPreviewToMessage(messageId, preview) {
+    const index = messages.value.findIndex((item) => Number(item.id) === messageId);
+
+    if (index === -1) {
+        return false;
+    }
+
+    messages.value[index] = {
+        ...messages.value[index],
+        link_preview: preview,
+    };
+
+    return true;
+}
+
+function mergePendingLinkPreview(messageId) {
+    const preview = pendingLinkPreviews.get(messageId);
+
+    if (!preview) {
+        return;
+    }
+
+    if (applyLinkPreviewToMessage(messageId, preview)) {
+        pendingLinkPreviews.delete(messageId);
+    }
+}
+
 function appendMessage(message) {
-    const existingIndex = messages.value.findIndex((item) => item.id === message.id);
+    const messageId = Number(message.id);
+    const existingIndex = messages.value.findIndex((item) => Number(item.id) === messageId);
     const isMine = resolveIsMine(message);
 
     if (existingIndex !== -1) {
-        if (isMine && !messages.value[existingIndex].is_mine) {
-            messages.value[existingIndex].is_mine = true;
+        let updated = messages.value[existingIndex];
+
+        if (isMine && !updated.is_mine) {
+            updated = { ...updated, is_mine: true };
         }
+
+        if (message.link_preview && !updated.link_preview) {
+            updated = { ...updated, link_preview: message.link_preview };
+        }
+
+        if (updated !== messages.value[existingIndex]) {
+            messages.value[existingIndex] = updated;
+        }
+
+        mergePendingLinkPreview(messageId);
 
         return;
     }
 
     messages.value.push(mapMessage(message));
+    mergePendingLinkPreview(messageId);
     updateRoomPreview(message);
 
     const roomId = Number(message.chat_room_id);
@@ -729,12 +772,12 @@ function handleMessageLinkPreviewReady(payload) {
         return;
     }
 
-    if (roomId === Number(activeRoomId.value)) {
-        const message = messages.value.find((item) => item.id === messageId);
+    if (roomId !== Number(activeRoomId.value)) {
+        return;
+    }
 
-        if (message) {
-            message.link_preview = preview;
-        }
+    if (!applyLinkPreviewToMessage(messageId, preview)) {
+        pendingLinkPreviews.set(messageId, preview);
     }
 }
 

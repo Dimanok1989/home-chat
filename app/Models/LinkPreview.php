@@ -15,6 +15,10 @@ class LinkPreview extends Model
         'title',
         'description',
         'image_url',
+        'image_disk',
+        'image_path',
+        'image_mime_type',
+        'image_access_token',
     ];
 
     public function messages(): HasMany
@@ -32,7 +36,35 @@ class LinkPreview extends Model
             'url' => $this->url,
             'title' => $this->title,
             'description' => $this->description,
-            'image_url' => $this->image_url,
+            'image_url' => $this->displayImageUrl(),
         ];
+    }
+
+    public function displayImageUrl(): ?string
+    {
+        if ($this->hasLocalImage()) {
+            $diskName = $this->image_disk ?? 'local';
+            $disk = \Illuminate\Support\Facades\Storage::disk($diskName);
+
+            if ($disk->exists($this->image_path)) {
+                return $this->localImageUrl();
+            }
+        }
+
+        return $this->image_url;
+    }
+
+    public function localImageUrl(): ?string
+    {
+        if ($this->image_path === null || $this->image_access_token === null) {
+            return null;
+        }
+
+        return url("/api/chat/link-previews/{$this->id}/image/{$this->image_access_token}");
+    }
+
+    public function hasLocalImage(): bool
+    {
+        return $this->image_path !== null && $this->image_access_token !== null;
     }
 }

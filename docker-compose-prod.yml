@@ -54,6 +54,7 @@ services:
       dockerfile: docker/php/prod/Dockerfile
     container_name: homechat-queue-prod
     restart: unless-stopped
+    user: "www-data"
     working_dir: /var/www
     entrypoint: ["php", "artisan", "queue:work", "--sleep=1", "--tries=3", "--timeout=30"]
     volumes:
