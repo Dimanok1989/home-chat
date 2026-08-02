@@ -18,6 +18,7 @@ class Message extends Model
         'user_id',
         'chat_room_id',
         'reply_to_id',
+        'link_preview_id',
         'body',
     ];
 
@@ -49,6 +50,11 @@ class Message extends Model
     public function replyTo(): BelongsTo
     {
         return $this->belongsTo(self::class, 'reply_to_id')->withTrashed();
+    }
+
+    public function linkPreview(): BelongsTo
+    {
+        return $this->belongsTo(LinkPreview::class);
     }
 
     /**
