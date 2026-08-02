@@ -2012,6 +2012,7 @@ onUnmounted(() => {
                 :current-user-id="currentUserId"
                 :incoming-offer="incomingCallOffer"
                 :signal="callSignal"
+                :online="roomOnline[activeRoomId] ?? false"
                 @end-call="endCall"
             />
         </div>

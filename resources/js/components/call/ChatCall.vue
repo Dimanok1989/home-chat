@@ -88,6 +88,10 @@ const props = defineProps({
         type: Object,
         default: null,
     },
+    online: {
+        type: Boolean,
+        default: false,
+    },
 });
 
 const emit = defineEmits(['end-call']);
@@ -104,8 +108,13 @@ const remoteStream = ref(null);
 const peerConnection = ref(null);
 const isMuted = ref(false);
 const isSpeakerOn = ref(true);
+const isCameraOn = ref(true);
+const isPeerCameraOn = ref(false);
+const isVideoCall = ref(false);
 const callDuration = ref(0);
 const endReason = ref(null); // 'rejected' | 'busy' | 'ended' | null
+const localVideoRef = ref(null);
+const remoteVideoRef = ref(null);
 let durationInterval = null;
 let localAudio = null;
 let remoteAudio = null;
@@ -126,6 +135,7 @@ const isCalling = computed(() => callPhase.value === 'calling');
 const isConnected = computed(() => callPhase.value === 'connected');
 const isEnded = computed(() => callPhase.value === 'ended');
 const isRinging = computed(() => callPhase.value === 'ringing');
+const isCallActive = computed(() => callPhase.value === 'calling' || callPhase.value === 'connected');
 
 const statusText = computed(() => {
     switch (callPhase.value) {
@@ -405,24 +415,30 @@ function playDisconnectedChime() {
 
 async function getLocalStream() {
     try {
-        console.log('[ChatCall] getLocalStream: запрос getUserMedia...');
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        console.log('[ChatCall] getLocalStream: поток получен, треков:', stream.getAudioTracks().length);
+        const constraints = { audio: true, video: isVideoCall.value };
+        console.log('[ChatCall] getLocalStream: запрос getUserMedia с constraints:', constraints);
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('[ChatCall] getLocalStream: поток получен, аудио треков:', stream.getAudioTracks().length, 'видео треков:', stream.getVideoTracks().length);
         localStream.value = stream;
 
         // Apply the pre-set mute state to the stream tracks.
-        // The user may have toggled the mute button before accepting the call,
-        // so we need to respect that choice when the stream is created.
         if (isMuted.value) {
             stream.getAudioTracks().forEach((track) => {
                 track.enabled = false;
             });
         }
 
+        // Apply the pre-set camera state to the video tracks.
+        // This respects the user's toggle on the ringing screen.
+        if (isVideoCall.value) {
+            stream.getVideoTracks().forEach((track) => {
+                track.enabled = isCameraOn.value;
+            });
+        }
+
         localAudio = new Audio();
         localAudio.srcObject = stream;
         localAudio.muted = true;
-        // Local audio play may fail in some browsers, but it's muted so it's non-critical
         try {
             await localAudio.play();
         } catch {
@@ -435,6 +451,24 @@ async function getLocalStream() {
         callPhase.value = 'ended';
         return null;
     }
+}
+
+async function startVideoCall() {
+    console.log('[ChatCall] startVideoCall: начало исходящего видео звонка, peer:', props.peerUser?.id, props.peerUser?.display_name);
+    isVideoCall.value = true;
+    await startCall();
+}
+
+function toggleCamera() {
+    isCameraOn.value = !isCameraOn.value;
+    if (localStream.value) {
+        const videoTracks = localStream.value.getVideoTracks();
+        videoTracks.forEach((track) => {
+            track.enabled = isCameraOn.value;
+        });
+    }
+    // Notify the peer about the camera state change via signaling
+    sendSignal('camera-state', { enabled: isCameraOn.value });
 }
 
 function createPeerConnection() {
@@ -453,6 +487,21 @@ function createPeerConnection() {
     pc.ontrack = (event) => {
         console.log('[ChatCall] ontrack: получен удалённый трек, streams:', event.streams.length, 'track.kind:', event.track?.kind);
         remoteStream.value = event.streams[0];
+
+        // Track peer's video camera state via mute/unmute events on the video track.
+        // When the peer disables their camera, the video track fires a 'mute' event.
+        // When they re-enable it, an 'unmute' event fires.
+        if (event.track.kind === 'video') {
+            isPeerCameraOn.value = !event.track.muted;
+            event.track.onmute = () => {
+                console.log('[ChatCall] peer video track muted');
+                isPeerCameraOn.value = false;
+            };
+            event.track.onunmute = () => {
+                console.log('[ChatCall] peer video track unmuted');
+                isPeerCameraOn.value = true;
+            };
+        }
 
         // Reuse the pre-created remoteAudio element (created within user gesture context
         // in startCall/acceptCall). The element was already "unlocked" for autoplay by
@@ -481,6 +530,9 @@ function createPeerConnection() {
             stopRingbackTone();
             playConnectedChime();
             startDurationTimer();
+            // Send initial camera state to the peer so they know
+            // whether our camera is on or off from the start.
+            sendSignal('camera-state', { enabled: isCameraOn.value });
         } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
             endCall();
         }
@@ -566,7 +618,7 @@ async function startCall() {
         console.log('[ChatCall] startCall: localDescription установлен, signalingState:', pc.signalingState);
         const sanitizedSdp = sanitizeSdp(offer.sdp);
         console.log('[ChatCall] startCall: отправка offer сигнала (sdp длина:', sanitizedSdp.length, ')');
-        sendSignal('offer', { sdp: sanitizedSdp });
+        sendSignal('offer', { sdp: sanitizedSdp, video: isVideoCall.value });
         // Start the ringback tone so the caller hears ringing while waiting
         startRingbackTone();
     } catch (err) {
@@ -880,6 +932,12 @@ async function handleCallSignal(data) {
                 return;
             }
 
+            // Detect if this is a video call from the offer payload
+            if (data.video) {
+                isVideoCall.value = true;
+                console.log('[ChatCall] handleCallSignal: входящий видео звонок');
+            }
+
             pendingOffer.value = new RTCSessionDescription({ type: 'offer', sdp: sanitizeSdp(data.sdp) });
             callPhase.value = 'ringing';
             startIncomingRingtone();
@@ -938,6 +996,11 @@ async function handleCallSignal(data) {
             endCall();
             break;
 
+        case 'camera-state':
+            console.log('[ChatCall] handleCallSignal: состояние камеры собеседника:', data.enabled);
+            isPeerCameraOn.value = data.enabled === true;
+            break;
+
         default:
             console.log('[ChatCall] handleCallSignal: неизвестный тип сигнала:', data.type);
             break;
@@ -955,6 +1018,11 @@ onMounted(() => {
     console.log('[ChatCall] onMounted: компонент смонтирован, incomingOffer:', !!props.incomingOffer, 'peerUser:', props.peerUser?.id, 'roomId:', props.roomId);
     if (props.incomingOffer) {
         console.log('[ChatCall] onMounted: восстановление входящего звонка из incomingOffer, sdp length:', props.incomingOffer.sdp?.length);
+        // Detect if the incoming offer is a video call
+        if (props.incomingOffer.video) {
+            isVideoCall.value = true;
+            console.log('[ChatCall] onMounted: входящий видео звонок');
+        }
         pendingOffer.value = new RTCSessionDescription({ type: 'offer', sdp: sanitizeSdp(props.incomingOffer.sdp) });
         callPhase.value = 'ringing';
         startIncomingRingtone();
@@ -972,47 +1040,135 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="flex h-full flex-col items-center justify-center bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800">
-        <!-- Peer avatar -->
-        <div class="mb-6">
-            <div class="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500 text-4xl font-bold text-white shadow-lg ring-4 ring-emerald-200 dark:ring-emerald-800">
+    <!-- Video call layout with remote video as background -->
+    <div
+        class="relative flex h-full flex-col bg-black"
+        :class="isVideoCall && isCallActive ? '' : 'items-center justify-center bg-gradient-to-br from-emerald-50 via-slate-50 to-blue-100 dark:from-gray-900 dark:via-slate-900 dark:to-gray-800'"
+    >
+        <!-- Remote video (full background during video call) -->
+        <video
+            v-if="isVideoCall && remoteStream && isCallActive"
+            ref="remoteVideoRef"
+            autoplay
+            playsinline
+            class="absolute inset-0 h-full w-full object-cover"
+            :srcObject="remoteStream"
+        ></video>
+
+        <!-- Peer camera-off overlay: show avatar + name when peer's camera is disabled -->
+        <div
+            v-if="isVideoCall && isCallActive && !isPeerCameraOn"
+            class="absolute inset-0 z-10 flex flex-col items-center justify-center"
+            :class="remoteStream ? 'bg-black/60' : 'bg-gray-900'"
+        >
+            <div class="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500 text-4xl font-bold text-white shadow-lg ring-4 ring-emerald-800">
                 {{ peerInitial }}
             </div>
+            <h2 class="mt-4 text-2xl font-semibold text-gray-100">
+                {{ peerName }}
+            </h2>
+            <p class="mt-2 text-sm text-gray-400">
+                {{ statusText }}
+            </p>
         </div>
 
-        <h2 class="mb-2 text-2xl font-semibold text-gray-900 dark:text-gray-100">
-            {{ peerName }}
-        </h2>
+        <!-- Fallback overlay when no remote video yet but in video call -->
+        <div
+            v-if="isVideoCall && isCallActive && !remoteStream"
+            class="absolute inset-0 flex flex-col items-center justify-center bg-gray-900"
+        >
+            <div class="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500 text-4xl font-bold text-white shadow-lg ring-4 ring-emerald-800">
+                {{ peerInitial }}
+            </div>
+            <h2 class="mt-4 text-2xl font-semibold text-gray-100">
+                {{ peerName }}
+            </h2>
+            <p class="mt-2 text-sm text-gray-400">
+                {{ statusText }}
+            </p>
+        </div>
 
-        <p class="mb-8 text-sm text-gray-500 dark:text-gray-400">
-            {{ statusText }}
-        </p>
+        <!-- Non-video call layout (centered avatar + controls) -->
+        <template v-if="!isVideoCall || !isCallActive">
+            <!-- Peer avatar -->
+            <div class="mb-6" v-if="!isVideoCall || !isCallActive">
+                <div class="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500 text-4xl font-bold text-white shadow-lg ring-4 ring-emerald-200 dark:ring-emerald-800">
+                    {{ peerInitial }}
+                </div>
+            </div>
+
+            <h2 class="mb-2 text-2xl font-semibold text-gray-900 dark:text-gray-100" :class="isVideoCall && isCallActive ? 'text-white' : ''">
+                {{ peerName }}
+            </h2>
+
+            <p class="mb-8 text-sm text-gray-500 dark:text-gray-400" :class="isVideoCall && isCallActive ? 'text-gray-300' : ''">
+                {{ statusText }}
+            </p>
+        </template>
 
         <!-- Pre-call screen (outgoing, waiting for user to start) -->
         <div v-if="isPreCall" class="flex flex-col items-center gap-6">
-            <button
-                type="button"
-                class="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg transition hover:bg-emerald-600 hover:scale-105 active:scale-95"
-                aria-label="Начать звонок"
-                @click="startCall"
-            >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    class="h-9 w-9"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                >
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-                </svg>
-            </button>
+            <template v-if="online">
+                <div class="flex items-center gap-8">
+                    <!-- Audio call button -->
+                    <div class="flex flex-col items-center gap-3">
+                        <button
+                            type="button"
+                            class="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg transition hover:bg-emerald-600 hover:scale-105 active:scale-95"
+                            aria-label="Начать звонок"
+                            @click="startCall"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-9 w-9"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                            </svg>
+                        </button>
+                        <span class="text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                            Звонок
+                        </span>
+                    </div>
 
-            <span class="text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                Начать звонок
-            </span>
+                    <!-- Video call button -->
+                    <div class="flex flex-col items-center gap-3">
+                        <button
+                            type="button"
+                            class="flex h-20 w-20 items-center justify-center rounded-full bg-blue-500 text-white shadow-lg transition hover:bg-blue-600 hover:scale-105 active:scale-95"
+                            aria-label="Начать видео звонок"
+                            @click="startVideoCall"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-9 w-9"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M23 7l-7 5 7 5V7z" />
+                                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                            </svg>
+                        </button>
+                        <span class="text-sm font-medium text-blue-600 dark:text-blue-400">
+                            Видеозвонок
+                        </span>
+                    </div>
+                </div>
+            </template>
+            <template v-else>
+                <p class="text-center text-lg font-medium text-gray-500 dark:text-gray-400">
+                    Пользователь не в сети
+                </p>
+            </template>
 
             <button
                 type="button"
@@ -1023,8 +1179,50 @@ onUnmounted(() => {
             </button>
         </div>
 
-        <!-- Call controls (calling / ringing / connected) -->
-        <div v-if="!isPreCall && !isEnded" class="flex items-center gap-6">
+        <!-- Local video (picture-in-picture, bottom-right corner) -->
+        <div
+            v-if="isVideoCall && localStream && isCallActive"
+            class="absolute bottom-28 right-4 z-10 h-36 w-28 overflow-hidden rounded-xl border-2 border-white/60 shadow-xl md:h-44 md:w-36"
+        >
+            <video
+                ref="localVideoRef"
+                autoplay
+                playsinline
+                muted
+                class="h-full w-full object-cover"
+                :class="isCameraOn ? '' : 'hidden'"
+                :srcObject="localStream"
+            ></video>
+            <div
+                v-if="!isCameraOn"
+                class="flex h-full w-full items-center justify-center bg-gray-800"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-8 w-8 text-gray-400"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <line x1="2" x2="22" y1="2" y2="22" />
+                    <path d="M10.41 10.41a2 2 0 0 0 3.18 3.18" />
+                    <path d="M23 7l-7 5 7 5V7Z" />
+                    <rect x="1" y="5" width="14" height="14" rx="2" ry="2" />
+                </svg>
+            </div>
+        </div>
+
+        <!-- Call controls (calling / ringing / connected) - moved to bottom -->
+        <div
+            v-if="!isPreCall && !isEnded"
+            class="absolute bottom-0 left-0 right-0 z-10 flex items-center justify-center gap-6 pb-8 pt-4"
+            :class="isVideoCall && isCallActive
+                ? 'bg-gradient-to-t from-black/70 to-transparent'
+                : ''"
+        >
             <!-- Mute button -->
             <button
                 type="button"
@@ -1067,6 +1265,49 @@ onUnmounted(() => {
                     <path d="M12 19v3" />
                     <path d="M8 22h8" />
                     <path d="M12 2a3 3 0 0 0-3 3v5.5" />
+                </svg>
+            </button>
+
+            <!-- Camera toggle button (during ringing and active call) -->
+            <button
+                v-if="isVideoCall"
+                type="button"
+                class="flex h-14 w-14 items-center justify-center rounded-full transition"
+                :class="isCameraOn
+                    ? 'bg-white text-gray-600 shadow hover:bg-gray-100 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+                    : 'bg-red-500 text-white shadow-lg hover:bg-red-600'"
+                aria-label="Включить/выключить камеру"
+                @click="toggleCamera"
+            >
+                <svg
+                    v-if="isCameraOn"
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-6 w-6"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <path d="M23 7l-7 5 7 5V7Z" />
+                    <rect x="1" y="5" width="14" height="14" rx="2" ry="2" />
+                </svg>
+                <svg
+                    v-else
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-6 w-6"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <line x1="2" x2="22" y1="2" y2="22" />
+                    <path d="M10.41 10.41a2 2 0 0 0 3.18 3.18" />
+                    <path d="M23 7l-7 5 7 5V7Z" />
+                    <rect x="1" y="5" width="14" height="14" rx="2" ry="2" />
                 </svg>
             </button>
 
