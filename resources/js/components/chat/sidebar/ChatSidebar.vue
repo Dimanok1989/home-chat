@@ -169,6 +169,10 @@ function handleRoomClick(roomId) {
 }
 
 function onRoomKeydown(event, roomId) {
+    if (event.target.closest('a')) {
+        return;
+    }
+
     if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         handleRoomClick(roomId);

@@ -27,6 +27,10 @@ defineProps({
 const emit = defineEmits(['click']);
 
 function onKeydown(event) {
+    if (event.target.closest('a')) {
+        return;
+    }
+
     if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         emit('click');

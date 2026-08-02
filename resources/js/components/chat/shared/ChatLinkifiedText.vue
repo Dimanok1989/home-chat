@@ -17,6 +17,7 @@ const segments = computed(() => linkifyText(props.text));
         v-for="(segment, index) in segments"
         :key="index"
     >
+        <!-- Links may live inside role=button wrappers; stop propagation so keyboard activates the link. -->
         <a
             v-if="segment.type === 'link'"
             :href="segment.href"
@@ -24,6 +25,7 @@ const segments = computed(() => linkifyText(props.text));
             rel="noopener noreferrer"
             class="underline underline-offset-2 hover:opacity-80"
             @click.stop
+            @keydown.stop
         >
             {{ segment.value }}
         </a>
