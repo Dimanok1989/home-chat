@@ -720,6 +720,24 @@ function handleUnreadCountUpdated(payload) {
     showNewMessageNotification(payload);
 }
 
+function handleMessageLinkPreviewReady(payload) {
+    const messageId = Number(payload.message_id);
+    const roomId = Number(payload.chat_room_id);
+    const preview = payload.link_preview;
+
+    if (!messageId || !preview) {
+        return;
+    }
+
+    if (roomId === Number(activeRoomId.value)) {
+        const message = messages.value.find((item) => item.id === messageId);
+
+        if (message) {
+            message.link_preview = preview;
+        }
+    }
+}
+
 function handleMessageSent(payload) {
     const roomId = Number(payload.chat_room_id);
 
@@ -985,6 +1003,7 @@ function subscribeRoomPresence(roomId) {
         .listen('.MessageSent', handleMessageSent)
         .listen('.MessageDeleted', handleMessageDeleted)
         .listen('.ProfileUpdated', handleProfileUpdated)
+        .listen('.MessageLinkPreviewReady', handleMessageLinkPreviewReady)
         .error((err) => {
             console.error('Echo presence error', err);
             notifyError('Ошибка подключения к чату');

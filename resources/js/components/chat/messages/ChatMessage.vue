@@ -4,6 +4,7 @@ import { formatDateTime, formatTime, isSystemMessage, isCallMessage, parseCallMe
 import ChatMessageReplyQuote from './ChatMessageReplyQuote.vue';
 import ChatUserAvatar from '../shared/ChatUserAvatar.vue';
 import ChatLinkifiedText from '../shared/ChatLinkifiedText.vue';
+import ChatLinkPreview from './ChatLinkPreview.vue';
 
 const props = defineProps({
     message: {
@@ -354,6 +355,12 @@ function handleStartDirectToRegUser() {
                     <ChatLinkifiedText :text="message.body" />
                 </p>
 
+                <ChatLinkPreview
+                    v-if="message.link_preview"
+                    :preview="message.link_preview"
+                    :is-mine="false"
+                />
+
                 <p
                     class="mt-1 text-right text-xs text-gray-400 dark:text-gray-500"
                 >
@@ -400,6 +407,12 @@ function handleStartDirectToRegUser() {
             >
                 <ChatLinkifiedText :text="message.body" />
             </p>
+
+            <ChatLinkPreview
+                v-if="message.link_preview"
+                :preview="message.link_preview"
+                :is-mine="true"
+            />
 
             <p
                 class="mt-1 text-right text-xs text-gray-500 dark:text-gray-400"
