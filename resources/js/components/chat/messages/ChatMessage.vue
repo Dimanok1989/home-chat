@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { formatDateTime, formatTime, isSystemMessage, isCallMessage, parseCallMessage, parseRegistrationMessage } from '../../../utils/chatFormat';
 import ChatMessageReplyQuote from './ChatMessageReplyQuote.vue';
 import ChatUserAvatar from '../shared/ChatUserAvatar.vue';
+import ChatLinkifiedText from '../shared/ChatLinkifiedText.vue';
 
 const props = defineProps({
     message: {
@@ -141,7 +142,7 @@ function handleStartDirectToRegUser() {
                 v-if="message.body && !regUser"
                 class="whitespace-pre-wrap break-words"
             >
-                {{ message.body }}
+                <ChatLinkifiedText :text="message.body" />
             </p>
 
             <p
@@ -350,7 +351,7 @@ function handleStartDirectToRegUser() {
                     v-if="message.body"
                     class="whitespace-pre-wrap break-words text-sm"
                 >
-                    {{ message.body }}
+                    <ChatLinkifiedText :text="message.body" />
                 </p>
 
                 <p
@@ -397,7 +398,7 @@ function handleStartDirectToRegUser() {
                 v-if="message.body"
                 class="whitespace-pre-wrap break-words text-sm"
             >
-                {{ message.body }}
+                <ChatLinkifiedText :text="message.body" />
             </p>
 
             <p
