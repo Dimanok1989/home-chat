@@ -15,6 +15,10 @@ return new class extends Migration
             return;
         }
 
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         DB::statement('ALTER TABLE sessions MODIFY user_id VARCHAR(36) NULL');
     }
 
@@ -24,6 +28,10 @@ return new class extends Migration
     public function down(): void
     {
         if (! Schema::hasTable('sessions')) {
+            return;
+        }
+
+        if (DB::getDriverName() === 'sqlite') {
             return;
         }
 
