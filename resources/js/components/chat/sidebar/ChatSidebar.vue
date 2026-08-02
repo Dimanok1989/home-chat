@@ -6,6 +6,7 @@ import ChatInvitePage from './ChatInvitePage.vue';
 import ChatSidebarMenu from './menu/ChatSidebarMenu.vue';
 import ChatSidebarProfile from './ChatSidebarProfile.vue';
 import ChatUserAvatar from '../shared/ChatUserAvatar.vue';
+import ChatLinkifiedText from '../shared/ChatLinkifiedText.vue';
 
 const props = defineProps({
     rooms: {
@@ -165,6 +166,13 @@ function handleUserClick(user) {
 
 function handleRoomClick(roomId) {
     emit('selectRoom', roomId);
+}
+
+function onRoomKeydown(event, roomId) {
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        handleRoomClick(roomId);
+    }
 }
 
 function handleRoomContextMenu(event, room) {
@@ -536,8 +544,9 @@ onUnmounted(() => {
                                 :key="room.id"
                                 class="mb-1"
                             >
-                                <button
-                                    type="button"
+                                <div
+                                    role="button"
+                                    tabindex="0"
                                     class="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors"
                                     :class="[
                                         room.id === activeRoomId
@@ -546,6 +555,7 @@ onUnmounted(() => {
                                         'cursor-context-menu',
                                     ]"
                                     @click="handleRoomClick(room.id)"
+                                    @keydown="onRoomKeydown($event, room.id)"
                                     @contextmenu.prevent="handleRoomContextMenu($event, room)"
                                 >
                                     <ChatUserAvatar
@@ -563,7 +573,7 @@ onUnmounted(() => {
                                                 ? 'italic text-gray-500/50 dark:text-gray-400/50'
                                                 : 'text-gray-500 dark:text-gray-400'"
                                         >
-                                            {{ formatRoomPreview(room) }}
+                                            <ChatLinkifiedText :text="formatRoomPreview(room)" />
                                         </span>
                                     </span>
                                     <span
@@ -573,7 +583,7 @@ onUnmounted(() => {
                                     >
                                         {{ formatUnreadCount(room.unread_count) }}
                                     </span>
-                                </button>
+                                </div>
                             </li>
                         </ul>
 
@@ -603,13 +613,15 @@ onUnmounted(() => {
                             :key="room.id"
                             class="mb-1"
                         >
-                            <button
-                                type="button"
+                            <div
+                                role="button"
+                                tabindex="0"
                                 class="flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors"
                                 :class="room.id === activeRoomId
                                     ? 'bg-blue-50 dark:bg-blue-950/40'
                                     : 'hover:bg-gray-100 dark:hover:bg-gray-800'"
                                 @click="handleRoomClick(room.id)"
+                                @keydown="onRoomKeydown($event, room.id)"
                             >
                                 <ChatUserAvatar
                                     :avatar-url="roomAvatar(room).avatarUrl"
@@ -626,7 +638,7 @@ onUnmounted(() => {
                                             ? 'italic text-gray-500/50 dark:text-gray-400/50'
                                             : 'text-gray-500 dark:text-gray-400'"
                                     >
-                                        {{ formatRoomPreview(room) }}
+                                        <ChatLinkifiedText :text="formatRoomPreview(room)" />
                                     </span>
                                 </span>
                                 <span
@@ -636,7 +648,7 @@ onUnmounted(() => {
                                 >
                                     {{ formatUnreadCount(room.unread_count) }}
                                 </span>
-                            </button>
+                            </div>
                         </li>
                     </ul>
 
