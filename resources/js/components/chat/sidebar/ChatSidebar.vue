@@ -19,9 +19,13 @@ const props = defineProps({
         type: Object,
         default: () => ({}),
     },
+    incomingCall: {
+        type: Object,
+        default: null,
+    },
 });
 
-const emit = defineEmits(['selectRoom', 'startDirect', 'openCreateGroup', 'showRoomContextMenu']);
+const emit = defineEmits(['selectRoom', 'startDirect', 'openCreateGroup', 'showRoomContextMenu', 'acceptIncomingCall', 'dismissIncomingCall']);
 
 const { isDark, toggleTheme } = useTheme();
 
@@ -51,11 +55,18 @@ const editProfileError = ref('');
 const directRooms = computed(() => props.rooms.filter((room) => room.type === 'direct'));
 const groupRooms = computed(() => props.rooms.filter((room) => room.type === 'global' || room.type === 'group'));
 
+const directUnreadTotal = computed(() =>
+    directRooms.value.reduce((sum, room) => sum + (room.unread_count || 0), 0)
+);
+const groupUnreadTotal = computed(() =>
+    groupRooms.value.reduce((sum, room) => sum + (room.unread_count || 0), 0)
+);
+
 const showSearchResults = computed(() => searchQuery.value.trim().length > 0 && sidebarView.value === 'chats');
 
 function formatUnreadCount(count) {
-    if (count > 99) {
-        return '99+';
+    if (count > 9) {
+        return '9+';
     }
 
     return String(count);
@@ -292,6 +303,69 @@ onUnmounted(() => {
 
 <template>
     <aside class="flex h-full w-full shrink-0 flex-col bg-white dark:bg-gray-900 md:my-3 md:mx-2 md:h-auto md:w-90 md:rounded-lg md:border md:border-gray-100 dark:md:border-gray-800">
+        <!-- Incoming call notification banner -->
+        <div
+            v-if="incomingCall"
+            class="animate-slide-down border-b border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/80"
+        >
+            <div class="flex items-center gap-3">
+                <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-sm font-bold text-white">
+                    {{ incomingCall.peer?.initial ?? '?' }}
+                </div>
+                <div class="min-w-0 flex-1">
+                    <p class="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+                        Входящий звонок
+                    </p>
+                    <p class="truncate text-xs text-emerald-700 dark:text-emerald-300">
+                        {{ incomingCall.peer?.display_name ?? 'Пользователь' }}
+                    </p>
+                </div>
+                <div class="flex shrink-0 gap-2">
+                    <button
+                        type="button"
+                        class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-white shadow transition hover:bg-emerald-600 active:scale-95"
+                        aria-label="Принять звонок"
+                        title="Принять"
+                        @click="emit('acceptIncomingCall')"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-5 w-5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                        </svg>
+                    </button>
+                    <button
+                        type="button"
+                        class="flex h-9 w-9 items-center justify-center rounded-full bg-red-500 text-white shadow transition hover:bg-red-600 active:scale-95"
+                        aria-label="Отклонить звонок"
+                        title="Отклонить"
+                        @click="emit('dismissIncomingCall')"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-5 w-5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="M18 6 6 18" />
+                            <path d="m6 6 12 12" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div class="border-b border-gray-100 p-3 dark:border-gray-800 md:hidden">
             <h1 class="text-lg font-semibold">{{ sidebarView === 'profile' ? 'Профиль' : 'Чаты' }}</h1>
         </div>
@@ -355,6 +429,12 @@ onUnmounted(() => {
                     @click="activeTab = 'users'"
                 >
                     Личные чаты
+                    <span
+                        v-if="directUnreadTotal > 0"
+                        class="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1.5 text-xs font-semibold text-white"
+                    >
+                        {{ formatUnreadCount(directUnreadTotal) }}
+                    </span>
                 </button>
                 <button
                     type="button"
@@ -365,6 +445,12 @@ onUnmounted(() => {
                     @click="activeTab = 'chats'"
                 >
                     Групповые
+                    <span
+                        v-if="groupUnreadTotal > 0"
+                        class="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1.5 text-xs font-semibold text-white"
+                    >
+                        {{ formatUnreadCount(groupUnreadTotal) }}
+                    </span>
                 </button>
             </div>
         </div>

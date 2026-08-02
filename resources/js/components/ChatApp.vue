@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useMediaQuery } from '../composables/useMediaQuery';
 import { useToast } from '../composables/useToast';
+import { useBrowserNotification } from '../composables/useBrowserNotification';
 import { buildMessagePreview } from '../utils/chatFormat';
 import ChatCall from './call/ChatCall.vue';
 import ChatConfirmModal from './chat/modals/ChatConfirmModal.vue';
@@ -74,9 +75,11 @@ const callActive = ref(false);
 const callPeerUser = ref(null);
 const incomingCallOffer = ref(null);
 const callSignal = ref(null);
+const incomingCallNotification = ref(null); // { peer } or null — shown in sidebar
 
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
-const { message: toastMessage, visible: toastVisible, showError: showToastError, hide: hideToast } = useToast();
+const { message: toastMessage, visible: toastVisible, type: toastType, showError: showToastError, showInfo: showToastInfo, hide: hideToast } = useToast();
+const browserNotify = useBrowserNotification();
 
 function parseApiError(data, fallback) {
     if (data?.errors) {
@@ -674,6 +677,37 @@ function removeRoomPresenceUser(roomId, user) {
     setRoomPresence(roomId, current.filter((item) => item.id !== user.id));
 }
 
+function showNewMessageNotification(payload) {
+    const roomId = Number(payload.chat_room_id);
+
+    if (!roomId || roomId === Number(activeRoomId.value)) {
+        return;
+    }
+
+    const room = rooms.value.find((item) => item.id === roomId);
+
+    if (!room) {
+        return;
+    }
+
+    // Only show notification for direct messages
+    if (room.type !== 'direct') {
+        return;
+    }
+
+    const peerName = room.peer?.display_name ?? room.title ?? 'Пользователь';
+    const preview = payload.preview ?? payload.body ?? 'Новое сообщение';
+    const truncatedPreview = preview.length > 50 ? preview.substring(0, 50) + '…' : preview;
+
+    showToastInfo(`${peerName}: ${truncatedPreview}`);
+
+    // Browser notification — just inform that there's a new message
+    browserNotify.show('Новое сообщение', {
+        body: 'У вас новое сообщение',
+        tag: `message-${roomId}`,
+    });
+}
+
 function handleUnreadCountUpdated(payload) {
     const roomId = Number(payload.chat_room_id);
     const count = Number(payload.unread_count ?? 0);
@@ -683,6 +717,7 @@ function handleUnreadCountUpdated(payload) {
     }
 
     updateRoomUnread(roomId, count);
+    showNewMessageNotification(payload);
 }
 
 function handleMessageSent(payload) {
@@ -694,6 +729,8 @@ function handleMessageSent(payload) {
 
             if (roomId === Number(activeRoomId.value)) {
                 appendMessage(payload);
+            } else {
+                showNewMessageNotification(payload);
             }
         });
 
@@ -704,6 +741,8 @@ function handleMessageSent(payload) {
 
     if (roomId === Number(activeRoomId.value)) {
         appendMessage(payload);
+    } else {
+        showNewMessageNotification(payload);
     }
 }
 
@@ -862,6 +901,18 @@ function handleIncomingCallSignal(data) {
         };
     }
 
+    // Show incoming call notification in the sidebar instead of immediately going full-screen
+    incomingCallNotification.value = { peer };
+
+    // Also show a toast notification
+    showToastInfo(`Входящий звонок от ${peer.display_name}`);
+
+    // Browser notification
+    browserNotify.show('Входящий звонок', {
+        body: `${peer.display_name} звонит вам`,
+        tag: 'incoming-call',
+    });
+
     incomingCallOffer.value = data;
     callPeerUser.value = peer;
     callActive.value = true;
@@ -877,6 +928,15 @@ function handleIncomingCallSignal(data) {
     } catch (e) {
         console.warn('[ChatApp] handleIncomingCallSignal: не удалось сохранить в sessionStorage:', e);
     }
+}
+
+function acceptIncomingCall() {
+    incomingCallNotification.value = null;
+}
+
+function dismissIncomingCall() {
+    incomingCallNotification.value = null;
+    endCall();
 }
 
 function subscribeUserChannel() {
@@ -981,6 +1041,7 @@ function endCall() {
     callActive.value = false;
     callPeerUser.value = null;
     incomingCallOffer.value = null;
+    incomingCallNotification.value = null;
 
     // Clear persisted call state
     try {
@@ -1812,6 +1873,9 @@ onMounted(async () => {
     document.addEventListener('paste', handlePaste);
     window.addEventListener('popstate', handlePopState);
 
+    // Request browser notification permission (non-blocking)
+    browserNotify.requestPermission();
+
     try {
         subscribeUserChannel();
         await loadRooms();
@@ -1824,6 +1888,7 @@ onMounted(async () => {
             incomingCallOffer.value = pendingCall.offer;
             callPeerUser.value = pendingCall.peer;
             callActive.value = true;
+            incomingCallNotification.value = { peer: pendingCall.peer };
             history.replaceState({ call: true }, '', '/call');
         }
 
@@ -1883,10 +1948,13 @@ onUnmounted(() => {
             :rooms="rooms"
             :active-room-id="activeRoomId"
             :room-online="roomOnline"
+            :incoming-call="incomingCallNotification"
             @select-room="selectRoom"
             @start-direct="startDirect"
             @open-create-group="openCreateGroupModal"
             @show-room-context-menu="showRoomContextMenu"
+            @accept-incoming-call="acceptIncomingCall"
+            @dismiss-incoming-call="dismissIncomingCall"
         />
 
         <main
@@ -2021,6 +2089,7 @@ onUnmounted(() => {
             <ChatToast
                 :message="toastMessage"
                 :visible="toastVisible"
+                :type="toastType"
                 @close="hideToast"
             />
 
