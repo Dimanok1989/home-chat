@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Events\MessageDeleted;
 use App\Events\MessageSent;
+use App\Jobs\FetchLinkPreview;
 use App\Models\ChatRoom;
 use App\Support\BroadcastsChatRoomCreated;
 use App\Support\BroadcastsUnreadCount;
+use App\Support\MessageUrlExtractor;
 use App\Models\Message;
 use App\Models\MessageAttachment;
 use App\Models\User;
@@ -63,7 +65,7 @@ class MessageController extends Controller
 
         $messages = Message::query()
             ->whereIn('id', $pageIds)
-            ->with(['attachments', 'user', 'replyTo.user', 'replyTo.attachments'])
+            ->with(['attachments', 'user', 'replyTo.user', 'replyTo.attachments', 'linkPreview'])
             ->orderBy('id')
             ->get()
             ->map(fn (Message $message) => $this->formatMessage($message, $currentUserId));
@@ -116,7 +118,7 @@ class MessageController extends Controller
 
         $messages = Message::query()
             ->whereIn('id', $allIds)
-            ->with(['attachments', 'user', 'replyTo.user', 'replyTo.attachments'])
+            ->with(['attachments', 'user', 'replyTo.user', 'replyTo.attachments', 'linkPreview'])
             ->orderBy('id')
             ->get()
             ->map(fn (Message $message) => $this->formatMessage($message, $currentUserId));
@@ -225,10 +227,17 @@ class MessageController extends Controller
 
             $room->update(['last_message_at' => $message->created_at]);
 
-            return $message->load(['attachments', 'user', 'replyTo.user', 'replyTo.attachments']);
+            return $message->load(['attachments', 'user', 'replyTo.user', 'replyTo.attachments', 'linkPreview']);
         });
 
         broadcast(new MessageSent($message));
+
+        if (
+            ! $hasImage
+            && MessageUrlExtractor::singleUrl($message->body) !== null
+        ) {
+            FetchLinkPreview::dispatch($message->id);
+        }
 
         $room->markReadUpTo($currentUserId, $message->id);
         $this->broadcastUnreadCountsForRoom($room->fresh(['users']));
@@ -270,7 +279,7 @@ class MessageController extends Controller
 
         $lastMessage = Message::query()
             ->where('chat_room_id', $roomId)
-            ->with(['attachments', 'user'])
+            ->with(['attachments', 'user', 'linkPreview'])
             ->latest('id')
             ->first();
 
@@ -329,6 +338,7 @@ class MessageController extends Controller
             'attachments' => $message->attachments->map(
                 fn (MessageAttachment $attachment) => $this->formatAttachment($attachment),
             )->values()->all(),
+            'link_preview' => $message->linkPreview?->toApiArray(),
         ];
     }
 
