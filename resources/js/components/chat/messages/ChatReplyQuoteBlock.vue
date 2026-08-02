@@ -1,4 +1,6 @@
 <script setup>
+import ChatLinkifiedText from '../shared/ChatLinkifiedText.vue';
+
 defineProps({
     title: {
         type: String,
@@ -22,13 +24,18 @@ defineProps({
     },
 });
 
-defineEmits(['click']);
+const emit = defineEmits(['click']);
+
+function onKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        emit('click');
+    }
+}
 </script>
 
 <template>
-    <component
-        :is="interactive ? 'button' : 'div'"
-        :type="interactive ? 'button' : undefined"
+    <div
         class="relative block w-full overflow-hidden rounded-md border-l-[3px] text-left transition-colors duration-150"
         :class="[
             compact ? 'mb-0' : 'mb-1.5',
@@ -43,7 +50,10 @@ defineEmits(['click']);
                     interactive ? 'hover:bg-gray-200 dark:hover:bg-gray-800/85' : '',
                 ],
         ]"
-        @click="interactive && $emit('click')"
+        :role="interactive ? 'button' : undefined"
+        :tabindex="interactive ? 0 : undefined"
+        @click="interactive && emit('click')"
+        @keydown="interactive && onKeydown($event)"
     >
         <div class="px-2.5 py-1.5 pl-3">
             <div
@@ -61,8 +71,8 @@ defineEmits(['click']);
                     ? 'text-gray-600 dark:text-blue-200/85'
                     : 'text-gray-600 dark:text-gray-400'"
             >
-                {{ subtitle }}
+                <ChatLinkifiedText :text="subtitle" />
             </div>
         </div>
-    </component>
+    </div>
 </template>
