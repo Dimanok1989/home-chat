@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { formatDateTime, formatTime, isSystemMessage, isCallMessage, parseCallMessage } from '../../../utils/chatFormat';
+import { formatDateTime, formatTime, isSystemMessage, isCallMessage, parseCallMessage, parseRegistrationMessage } from '../../../utils/chatFormat';
 import ChatMessageReplyQuote from './ChatMessageReplyQuote.vue';
 import ChatUserAvatar from '../shared/ChatUserAvatar.vue';
 
@@ -21,7 +21,16 @@ const avatarMenuOpen = ref(false);
 const avatarMenuX = ref(0);
 const avatarMenuY = ref(0);
 
+const regUserMenuOpen = ref(false);
+const regUserMenuX = ref(0);
+const regUserMenuY = ref(0);
+
 const callInfo = computed(() => parseCallMessage(props.message));
+
+const regUser = computed(() => {
+    if (!isSystemMessage(props.message)) return null;
+    return parseRegistrationMessage(props.message.body);
+});
 
 function messageCanDelete(msg) {
     return msg.is_mine && !isSystemMessage(msg) && !isCallMessage(msg);
@@ -74,6 +83,29 @@ function handleStartDirect() {
         initial: props.message.user_initial,
     });
 }
+
+function handleRegUserNameClick(event) {
+    if (!regUser.value) return;
+    event.stopPropagation();
+    regUserMenuX.value = event.clientX;
+    regUserMenuY.value = event.clientY;
+    regUserMenuOpen.value = true;
+}
+
+function closeRegUserMenu() {
+    regUserMenuOpen.value = false;
+}
+
+function handleStartDirectToRegUser() {
+    if (!regUser.value) return;
+    regUserMenuOpen.value = false;
+    emit('startDirectFromAvatar', {
+        id: regUser.value.id,
+        display_name: regUser.value.name,
+        avatar_url: null,
+        initial: regUser.value.name ? regUser.value.name.charAt(0).toUpperCase() : '?',
+    });
+}
 </script>
 
 <template>
@@ -106,11 +138,60 @@ function handleStartDirect() {
             </div>
 
             <p
-                v-if="message.body"
+                v-if="message.body && !regUser"
                 class="whitespace-pre-wrap break-words"
             >
                 {{ message.body }}
             </p>
+
+            <p
+                v-if="message.body && regUser"
+                class="whitespace-pre-wrap break-words"
+            >
+                Новый пользователь
+                <button
+                    type="button"
+                    class="cursor-pointer font-semibold text-blue-600 underline underline-offset-2 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                    @click="handleRegUserNameClick"
+                >
+                    {{ regUser.name }}
+                </button>
+                зарегистрировался.
+            </p>
+
+            <Teleport to="body">
+                <div
+                    v-if="regUserMenuOpen"
+                    class="fixed inset-0 z-50"
+                    @click="closeRegUserMenu"
+                ></div>
+
+                <div
+                    v-if="regUserMenuOpen"
+                    class="fixed z-50 min-w-44 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                    :style="{ left: regUserMenuX + 'px', top: regUserMenuY + 'px' }"
+                >
+                    <button
+                        type="button"
+                        class="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                        @click="handleStartDirectToRegUser"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                        </svg>
+                        Написать личное сообщение
+                    </button>
+                </div>
+            </Teleport>
         </div>
 
         <!-- Call message -->

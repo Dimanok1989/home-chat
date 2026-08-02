@@ -143,6 +143,25 @@ export function parseCallMessage(message) {
     };
 }
 
+/**
+ * Parse a registration system message body and extract the user info.
+ * Format: "Новый пользователь [[Name|id]] зарегистрировался."
+ *
+ * @param {string} body
+ * @returns {{ name: string, id: number }|null}
+ */
+export function parseRegistrationMessage(body) {
+    if (!body) return null;
+
+    const match = body.match(/Новый пользователь \[\[(.+?)\|(\d+)\]\] зарегистрировался\./);
+    if (!match) return null;
+
+    return {
+        name: match[1],
+        id: Number(match[2]),
+    };
+}
+
 export function buildMessagePreview(message) {
     const hasAttachments = (message?.attachments ?? []).length > 0;
     const body = message?.body;

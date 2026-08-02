@@ -4,6 +4,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CallController;
 use App\Http\Controllers\ChatAttachmentController;
 use App\Http\Controllers\ChatRoomController;
+use App\Http\Controllers\InvitationController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\UserAvatarController;
@@ -13,6 +14,10 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('guest')->group(function () {
     Route::get('/', [AuthController::class, 'showLogin'])->name('login');
     Route::post('/login', [AuthController::class, 'login'])->name('login.submit');
+    Route::get('/invite/{token}', [InvitationController::class, 'showRegistrationForm'])
+        ->name('register.invite');
+    Route::post('/invite/{token}', [InvitationController::class, 'register'])
+        ->name('register.invite.submit');
 });
 
 Route::post('/logout', [AuthController::class, 'logout'])
@@ -40,4 +45,8 @@ Route::middleware('auth')->group(function () {
         ->name('chat.files.show');
     Route::post('/api/call/signal', [CallController::class, 'signal']);
     Route::post('/api/call/history', [CallController::class, 'history']);
+
+    // Invitation management
+    Route::get('/api/invitations', [InvitationController::class, 'indexTokens']);
+    Route::post('/api/invitations', [InvitationController::class, 'store']);
 });
