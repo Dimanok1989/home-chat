@@ -22,7 +22,7 @@ class CallController extends Controller
     {
         $data = $request->validate([
             'target_user_id' => 'required|integer|exists:users,id',
-            'type' => 'required|string|in:offer,answer,ice-candidate,hangup',
+            'type' => 'required|string|in:offer,answer,ice-candidate,hangup,camera-state',
             'payload' => 'required|array',
         ]);
 
