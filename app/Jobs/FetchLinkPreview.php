@@ -11,6 +11,7 @@ use App\Support\OgMetaParser;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -106,11 +107,31 @@ class FetchLinkPreview implements ShouldQueue
             return null;
         }
 
-        return LinkPreview::query()->create([
-            'url' => $url,
-            'title' => $meta['title'],
-            'description' => $meta['description'],
-            'image_url' => $imageUrl,
-        ]);
+        try {
+            return LinkPreview::query()->create([
+                'url' => $url,
+                'title' => $meta['title'],
+                'description' => $meta['description'],
+                'image_url' => $imageUrl,
+            ]);
+        } catch (QueryException $exception) {
+            if (! $this->isUniqueUrlViolation($exception)) {
+                throw $exception;
+            }
+
+            return LinkPreview::query()->where('url', $url)->first() ?? throw $exception;
+        }
+    }
+
+    private function isUniqueUrlViolation(QueryException $exception): bool
+    {
+        $sqlState = $exception->errorInfo[0] ?? null;
+        $driverCode = $exception->errorInfo[1] ?? null;
+        $message = strtolower($exception->getMessage());
+
+        return $sqlState === '23000'
+            || $sqlState === '23505'
+            || $driverCode === 1062
+            || ($driverCode === 19 && str_contains($message, 'unique constraint failed'));
     }
 }

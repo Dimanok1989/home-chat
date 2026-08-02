@@ -7,8 +7,11 @@ use App\Jobs\FetchLinkPreview;
 use App\Models\ChatRoom;
 use App\Models\LinkPreview;
 use App\Models\Message;
+use App\Models\MessageAttachment;
 use App\Models\User;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -99,6 +102,89 @@ class FetchLinkPreviewTest extends TestCase
             return $event->message->id === $message->id
                 && $event->linkPreview->is($preview);
         });
+    }
+
+    public function test_it_recovers_when_preview_is_created_during_fetch_race(): void
+    {
+        Event::fake([MessageLinkPreviewReady::class]);
+        Http::fake([
+            'https://example.com/race' => Http::response(<<<'HTML'
+                <html>
+                    <head>
+                        <meta property="og:title" content="Fresh title">
+                        <meta property="og:description" content="Fresh description">
+                    </head>
+                </html>
+                HTML, 200),
+        ]);
+
+        $message = $this->makeMessage('Race https://example.com/race');
+
+        $seeded = false;
+
+        DB::listen(function (QueryExecuted $query) use (&$seeded): void {
+            if ($seeded) {
+                return;
+            }
+
+            if (! str_contains($query->sql, 'from "link_previews"') || ! str_contains($query->sql, 'where "url" = ?')) {
+                return;
+            }
+
+            if (($query->bindings[0] ?? null) !== 'https://example.com/race') {
+                return;
+            }
+
+            $seeded = true;
+
+            LinkPreview::query()->create([
+                'url' => 'https://example.com/race',
+                'title' => 'Seeded title',
+                'description' => 'Seeded description',
+                'image_url' => null,
+            ]);
+        });
+
+        (new FetchLinkPreview($message->id))->handle();
+
+        $message->refresh();
+        $preview = LinkPreview::query()->where('url', 'https://example.com/race')->first();
+
+        $this->assertTrue($seeded);
+        $this->assertNotNull($preview);
+        $this->assertSame($preview->id, $message->link_preview_id);
+        $this->assertSame(1, LinkPreview::query()->where('url', 'https://example.com/race')->count());
+        Event::assertDispatched(MessageLinkPreviewReady::class, function (MessageLinkPreviewReady $event) use ($message, $preview): bool {
+            return $event->message->id === $message->id
+                && $event->linkPreview->is($preview);
+        });
+    }
+
+    public function test_it_skips_messages_with_attachments(): void
+    {
+        Event::fake([MessageLinkPreviewReady::class]);
+        Http::fake();
+
+        $message = $this->makeMessage('See https://example.com/attachment');
+        MessageAttachment::query()->create([
+            'message_id' => $message->id,
+            'disk' => 'local',
+            'path' => 'attachments/test.png',
+            'original_name' => 'test.png',
+            'mime_type' => 'image/png',
+            'size' => 123,
+            'access_token' => str_repeat('a', 64),
+            'token_expires_at' => now()->addHour(),
+        ]);
+
+        (new FetchLinkPreview($message->id))->handle();
+
+        $message->refresh();
+
+        $this->assertNull($message->link_preview_id);
+        $this->assertDatabaseCount('link_previews', 0);
+        Http::assertNothingSent();
+        Event::assertNotDispatched(MessageLinkPreviewReady::class);
     }
 
     private function makeMessage(string $body): Message
